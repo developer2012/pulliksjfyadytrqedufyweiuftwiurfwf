@@ -1,0 +1,409 @@
+<!-- public/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="x-ua-compatible" content="ie=edge" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+
+  <title>WonderTalk</title>
+
+  <!-- App meta -->
+  <meta name="theme-color" content="#0A1230" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="WonderTalk — Match • Chat • Voice • Icebreakers • AI Coach" />
+
+  <!-- Social -->
+  <meta property="og:title" content="WonderTalk" />
+  <meta property="og:description" content="Match • Chat • Voice • Icebreakers • AI Coach" />
+  <meta property="og:type" content="website" />
+
+  <!-- Icons (optional) -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' rx='16' fill='%232E6BFF'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Arial' font-size='34' font-weight='900' fill='white'%3EW%3C/text%3E%3C/svg%3E" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+  <!-- Background glow layer -->
+  <div class="bg" aria-hidden="true"></div>
+
+  <!-- App container -->
+  <div class="shell" id="appRoot">
+
+    <!-- Header -->
+    <header class="header" role="banner">
+      <div class="brand" role="group" aria-label="Brand">
+        <div class="logo" aria-hidden="true">W</div>
+
+        <div class="brandText">
+          <div class="name">WonderTalk</div>
+          <div class="tag">Match • Chat • Voice • Icebreakers • AI Coach</div>
+        </div>
+      </div>
+
+      <div class="headerStats" role="group" aria-label="Live stats">
+        <div class="pill" title="Users currently online">Online <b id="statOnline">0</b></div>
+        <div class="pill" title="Users waiting for a match">Waiting <b id="statWaiting">0</b></div>
+        <div class="pill" title="Active rooms">Rooms <b id="statRooms">0</b></div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="stack" role="main">
+
+      <!-- NAME SCREEN -->
+      <section id="screenName" class="card" aria-label="Name screen">
+        <div class="cardTitle">Enter your name</div>
+        <div class="cardSub">
+          Your name is saved locally, so you can return with the same name.
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          <input
+            id="nameInput"
+            class="input"
+            placeholder="Type your name..."
+            autocomplete="off"
+            inputmode="text"
+            maxlength="40"
+            aria-label="Your name"
+          />
+          <button id="btnJoin" class="btn primary" type="button">Continue</button>
+        </div>
+
+        <div id="nameErr" class="error" role="status" aria-live="polite"></div>
+
+        <div class="hint" style="margin-top:12px;">
+          Tip: Use a short name. You can change it later.
+        </div>
+      </section>
+
+      <!-- MAIN APP SCREEN -->
+      <section id="screenMain" class="stack" style="display:none;" aria-label="Main app screen">
+
+        <!-- TOP BAR / PROFILE -->
+        <section class="card" aria-label="Top bar">
+          <div class="row spread">
+            <div>
+              <div class="hello">
+                Hi, <b id="meName">—</b> 👋
+              </div>
+              <div class="small">
+                Home: your stats. Conversation: match + voice + AI coach.
+              </div>
+            </div>
+
+            <div class="row" style="gap:10px;">
+              <button id="btnLogout" class="btn ghost" type="button" title="Change name">
+                Change name
+              </button>
+            </div>
+          </div>
+
+          <!-- AI score bar (shows if aiScore exists) -->
+          <div class="scoreBar" id="scoreBar" style="display:none;" aria-label="AI score">
+            <div class="scoreItem">
+              <span class="muted">My AI Band</span>
+              <b id="myBand">—</b>
+            </div>
+            <div class="scoreItem">
+              <span class="muted">Fluency</span>
+              <b id="myFlu">—</b>
+            </div>
+            <div class="scoreItem">
+              <span class="muted">Grammar</span>
+              <b id="myGra">—</b>
+            </div>
+            <div class="scoreItem">
+              <span class="muted">Vocab</span>
+              <b id="myVoc">—</b>
+            </div>
+            <div class="scoreItem">
+              <span class="muted">Pron</span>
+              <b id="myPro">—</b>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB: HOME -->
+        <section id="tabHome" class="stack" aria-label="Home tab">
+          <section class="card" aria-label="Practice stats">
+            <div class="row spread">
+              <div>
+                <div class="cardTitle">Home</div>
+                <div class="cardSub">
+                  Your practice stats are stored locally on this device. Calendar updates as days pass.
+                </div>
+              </div>
+
+              <div class="row" style="gap:10px;">
+                <button id="btnResetStats" class="btn ghost" type="button" title="Reset local stats">
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="statGrid" role="group" aria-label="Stats cards" style="margin-top:12px;">
+              <div class="statBox">
+                <div class="statTop">Sessions</div>
+                <div class="statNum" id="homeSessions">0</div>
+              </div>
+              <div class="statBox">
+                <div class="statTop">Practice days</div>
+                <div class="statNum" id="homePracticeDays">0</div>
+              </div>
+              <div class="statBox">
+                <div class="statTop">Minutes</div>
+                <div class="statNum" id="homeMinutes">0</div>
+              </div>
+              <div class="statBox">
+                <div class="statTop">Streak</div>
+                <div class="statNum" id="homeStreak">0</div>
+              </div>
+              <div class="statBox">
+                <div class="statTop">Missed</div>
+                <div class="statNum" id="homeMissed">—</div>
+              </div>
+            </div>
+
+            <div id="homeHint" class="hint" style="margin-top:12px;">
+              Practice daily to build your streak ✅
+            </div>
+
+            <!-- Calendar -->
+            <section class="calendarCard" aria-label="Practice calendar" style="margin-top:12px;">
+              <div class="calHeader">
+                <button class="calNav" id="calPrev" type="button" aria-label="Previous month">‹</button>
+                <div class="calTitle" id="calTitle">—</div>
+                <button class="calNav" id="calNext" type="button" aria-label="Next month">›</button>
+              </div>
+
+              <!-- Week header (static) -->
+              <div class="calGridHead" aria-hidden="true">
+                <div class="dow">S</div><div class="dow">M</div><div class="dow">T</div><div class="dow">W</div><div class="dow">T</div><div class="dow">F</div><div class="dow">S</div>
+              </div>
+
+              <div class="calGrid" id="calGrid" role="grid" aria-label="Calendar days"></div>
+
+              <div class="calLegend" role="group" aria-label="Legend">
+                <span class="dot practiced" aria-hidden="true"></span>
+                <span class="legendTxt">Practiced</span>
+
+                <span style="width:10px;display:inline-block;"></span>
+
+                <span class="dot today" aria-hidden="true"></span>
+                <span class="legendTxt">Today</span>
+              </div>
+            </section>
+          </section>
+        </section>
+
+        <!-- TAB: LEADERBOARD -->
+        <section id="tabLb" class="stack" style="display:none;" aria-label="Leaderboard tab">
+          <section class="card" aria-label="Leaderboard">
+            <div class="row spread">
+              <div>
+                <div class="cardTitle">Leaderboard</div>
+                <div class="cardSub">
+                  Top-rated partners (human sessions only). AI sessions don't affect this.
+                </div>
+              </div>
+              <button id="btnLb" class="btn ghost" type="button">Refresh</button>
+            </div>
+
+            <div id="leaderboard" class="list" aria-label="Leaderboard list"></div>
+
+            <div class="hint" style="margin-top:12px;">
+              Tip: After a human conversation, rate your partner to update the leaderboard.
+            </div>
+          </section>
+        </section>
+
+        <!-- TAB: CONVERSATION / AI (app.js expects tabAi) -->
+        <section id="tabAi" class="stack" style="display:none;" aria-label="Conversation & AI tab">
+
+          <!-- MATCH / PREFS PANEL (app.js expects prefsPanel) -->
+          <section id="prefsPanel" class="card" aria-label="Conversation setup">
+            <div class="row spread">
+              <div>
+                <div class="cardTitle">Conversation</div>
+                <div class="cardSub">
+                  Start a human voice chat (WebRTC) or practice with AI Coach (turn-taking voice).
+                </div>
+              </div>
+
+              <div class="row" style="gap:10px;">
+                <button id="btnStop" class="btn" type="button" title="Stop searching">
+                  Stop
+                </button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="sectionTitle">Partner gender</div>
+              <div class="grid2">
+                <button class="chip" data-gender="Male" type="button">👨 Male</button>
+                <button class="chip" data-gender="Female" type="button">👩 Female</button>
+                <button class="chip active" data-gender="Any" type="button">🌍 Any</button>
+                <button class="chip" data-gender="AI" type="button">🤖 AI</button>
+              </div>
+
+              <div class="sectionTitle mt">English level</div>
+              <div class="grid2">
+                <button class="chip" data-level="Beginner" type="button">🌱 Beginner</button>
+                <button class="chip" data-level="Intermediate" type="button">🧩 Intermediate</button>
+                <button class="chip" data-level="Advanced" type="button">🚀 Advanced</button>
+                <button class="chip active" data-level="Any" type="button">📚 Any</button>
+              </div>
+
+              <div class="row mt">
+                <button id="btnFind" class="btn primary wide" type="button">Start</button>
+              </div>
+
+              <div id="searchInfo" class="hint" aria-live="polite"></div>
+
+              <div class="hint" style="margin-top:10px;">
+                Human: both users press Voice On. AI: Start AI → Voice On → speak → Voice Off → AI replies by voice.
+              </div>
+
+              <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap;">
+                <button id="btnStartAi" class="btn primary" type="button">Start AI</button>
+                <span id="aiHint" class="hint">Press Start AI to begin.</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- HUMAN CONNECTED PANEL -->
+          <section id="chatPanel" class="card" style="display:none;" aria-label="Human conversation panel">
+            <div class="row spread">
+              <div>
+                <div class="cardTitle">Connected</div>
+                <div class="cardSub">
+                  Talking with <b id="partnerName">—</b>
+                </div>
+              </div>
+              <button id="btnLeave" class="btn danger" type="button">Leave</button>
+            </div>
+
+            <!-- Icebreaker -->
+            <div class="icebreaker" id="iceWrap">
+              <div class="iceTop">
+                <div class="iceLabel">Icebreaker</div>
+                <div class="iceIndex"><span id="qIndex">1</span>/10</div>
+              </div>
+
+              <div class="iceBody">
+                <button id="qPrev" class="navBtn" type="button" aria-label="Previous question">←</button>
+                <div class="qText" id="qText">Loading questions...</div>
+                <button id="qNext" class="navBtn" type="button" aria-label="Next question">→</button>
+              </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="row mt" style="flex-wrap:wrap;">
+              <button id="btnVoice" class="btn primary" type="button">Voice On</button>
+
+              <button id="btnReport" class="btn" type="button" title="Report partner">
+                Report
+              </button>
+
+              <div class="rate" role="group" aria-label="Rate partner">
+                <button class="rateBtn" data-rate="1" type="button" title="Rate 1">1</button>
+                <button class="rateBtn" data-rate="2" type="button" title="Rate 2">2</button>
+                <button class="rateBtn" data-rate="3" type="button" title="Rate 3">3</button>
+                <button class="rateBtn" data-rate="4" type="button" title="Rate 4">4</button>
+                <button class="rateBtn" data-rate="5" type="button" title="Rate 5">5</button>
+              </div>
+            </div>
+
+            <div id="voiceHint" class="hint" style="margin-top:10px; display:none;"></div>
+
+            <!-- Messages -->
+            <div id="messages" class="messages" aria-label="Messages"></div>
+
+            <!-- Composer -->
+            <div class="composer" aria-label="Message composer">
+              <input id="msgInput" class="input" placeholder="Write a message..." autocomplete="off" aria-label="Message" />
+              <button id="btnSend" class="btn primary" type="button">Send</button>
+            </div>
+
+            <!-- Remote audio -->
+            <audio id="remoteAudio" autoplay playsinline></audio>
+
+            <div class="hint" style="margin-top:12px;">
+              If voice doesn't work with distant networks, you likely need TURN credentials (server .env).
+            </div>
+          </section>
+
+          <!-- AI COACH PANEL (always visible inside tabAi, but works only after Start AI) -->
+          <section class="card" aria-label="AI Coach panel">
+            <div class="row spread">
+              <div>
+                <div class="cardTitle">AI Coach</div>
+                <div class="cardSub">
+                  Voice turn-taking: Voice On → speak → Voice Off → AI replies by voice.
+                </div>
+              </div>
+
+              <div class="row" style="gap:10px; flex-wrap:wrap;">
+                <button id="btnAiVoice" class="btn" type="button">Voice On</button>
+                <button id="btnAiLeave" class="btn danger" type="button">Finish</button>
+              </div>
+            </div>
+
+            <div class="hint" style="margin-top:10px;">
+              Note: Works best in Chrome (SpeechRecognition + TTS).
+            </div>
+
+            <div class="messages" id="aiMessages" aria-label="AI messages" style="margin-top:12px;"></div>
+
+            <div class="composer" aria-label="AI message composer" style="margin-top:10px;">
+              <input id="aiInput" class="input" placeholder="Type to AI..." autocomplete="off" aria-label="AI message" />
+              <button id="btnAiSend" class="btn primary" type="button">Send</button>
+            </div>
+          </section>
+
+          <!-- AI REPORT (shown after finishing AI session) -->
+          <section class="card" id="aiReportCard" style="display:none;" aria-label="AI report">
+            <div class="cardTitle">My AI Report</div>
+            <div class="cardSub" id="aiReportSummary">—</div>
+            <div class="list" id="aiReportList"></div>
+
+            <div class="hint" style="margin-top:12px;">
+              This report appears only after an AI session ends (Finish).
+            </div>
+          </section>
+
+        </section>
+
+        <!-- Bottom nav -->
+        <nav class="bottomNav" aria-label="Bottom navigation">
+          <button class="navItem active" id="navHome" type="button">🏠 Home</button>
+          <button class="navItem" id="navLb" type="button">🏆 Leaderboard</button>
+          <button class="navItem" id="navAi" type="button">💬 Conversation</button>
+        </nav>
+      </section>
+
+      <!-- BANNED SCREEN -->
+      <section id="bannedScreen" class="card" style="display:none;" aria-label="Banned screen">
+        <div class="cardTitle">Access blocked</div>
+        <div class="cardSub">This name has been banned.</div>
+        <div class="hint" style="margin-top:12px;">
+          If you think this is a mistake, contact the admin.
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="small">© WonderTalk</div>
+    </footer>
+  </div>
+
+  <!-- Socket + App -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

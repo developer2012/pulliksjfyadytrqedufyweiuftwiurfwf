@@ -1,0 +1,220 @@
+<!-- public/admin.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>WonderTalk — Admin</title>
+  <link rel="stylesheet" href="/style.css"/>
+  <style>
+    .adminShell{max-width:980px;margin:0 auto;padding:18px 14px 28px}
+    .adminTop{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+    .adminTitle{display:flex;align-items:center;gap:12px}
+    .adminTitle .logo{width:44px;height:44px;border-radius:14px}
+    .adminTitle .t{display:grid;gap:2px}
+    .adminTitle .t .h{font-weight:950;font-size:18px;letter-spacing:.2px}
+    .adminTitle .t .s{font-size:12px;color:var(--muted)}
+    .adminGrid{display:grid;grid-template-columns: 1.2fr .8fr;gap:14px}
+    .kpiGrid{display:grid;grid-template-columns: repeat(4,1fr);gap:10px;margin-top:12px}
+    .kpi{border-radius:16px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.14);padding:12px}
+    .kpi .k{font-size:12px;color:var(--muted);font-weight:950}
+    .kpi .v{margin-top:8px;font-size:22px;font-weight:950}
+    .kpi .d{margin-top:6px;font-size:12px;color:var(--muted)}
+    .adminPanel{display:grid;gap:14px}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+    .seg{display:flex;gap:6px;flex-wrap:wrap}
+    .seg .chip{border-radius:999px;padding:10px 12px}
+    .seg .chip.active{border-radius:999px}
+    .table{margin-top:12px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.14);overflow:hidden}
+    .thead,.trow{display:grid;grid-template-columns: 1.4fr .6fr .9fr;gap:10px;align-items:center}
+    .thead{padding:10px 12px;background:rgba(255,255,255,.04);font-size:12px;color:var(--muted);font-weight:950}
+    .trow{padding:10px 12px;border-top:1px solid rgba(255,255,255,.06)}
+    .trow:hover{background:rgba(255,255,255,.03)}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+    .badge2{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.16);font-weight:950;font-size:12px}
+    .dot{width:8px;height:8px;border-radius:999px;background:rgba(32,201,151,.9);box-shadow:0 0 0 4px rgba(32,201,151,.12)}
+    .dot.warn{background:rgba(255,196,84,.95);box-shadow:0 0 0 4px rgba(255,196,84,.12)}
+    .dot.danger{background:rgba(255,110,110,.95);box-shadow:0 0 0 4px rgba(255,110,110,.12)}
+    .actions{display:flex;gap:8px;justify-content:flex-end}
+    .btn.sm{padding:9px 10px;border-radius:12px;font-weight:950;font-size:12px}
+    .input.sm{padding:10px 12px;border-radius:12px;font-size:13px}
+    .split{display:grid;grid-template-columns: 1fr 1fr;gap:10px}
+    .rightCol{display:grid;gap:14px}
+    .empty{padding:14px;color:var(--muted);font-size:12px}
+    .toastWrap{position:fixed;right:14px;bottom:14px;display:grid;gap:10px;z-index:50}
+    .toast{max-width:360px;border-radius:16px;border:1px solid rgba(255,255,255,.10);background:rgba(10,18,48,.92);backdrop-filter: blur(14px);box-shadow: var(--shadow);padding:12px}
+    .toast .tt{font-weight:950}
+    .toast .ts{margin-top:4px;color:var(--muted);font-size:12px}
+    .authOverlay{position:fixed;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.55);backdrop-filter: blur(10px);z-index:80}
+    .authCard{width:min(520px,92vw)}
+    .authRow{display:flex;gap:10px;margin-top:12px}
+    .lock{display:inline-flex;align-items:center;gap:8px}
+    .lockIcon{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)}
+    @media (max-width:920px){
+      .adminGrid{grid-template-columns: 1fr}
+      .kpiGrid{grid-template-columns: repeat(2,1fr)}
+    }
+  </style>
+</head>
+<body>
+  <div class="bg"></div>
+
+  <div class="adminShell">
+    <div class="adminTop">
+      <div class="adminTitle">
+        <div class="logo">W</div>
+        <div class="t">
+          <div class="h">WonderTalk Admin</div>
+          <div class="s">Live monitoring • reports • bans • leaderboard</div>
+        </div>
+      </div>
+
+      <div class="row" style="gap:10px;">
+        <div class="badge2"><span class="dot" id="liveDot"></span><span>LIVE</span></div>
+        <button id="btnRefresh" class="btn ghost">Refresh</button>
+      </div>
+    </div>
+
+    <div class="adminGrid">
+      <section class="card adminPanel">
+        <div class="row spread">
+          <div>
+            <div class="cardTitle">Overview</div>
+            <div class="cardSub">Realtime metrics and actions</div>
+          </div>
+          <div class="badge2"><span class="mono">v1</span></div>
+        </div>
+
+        <div class="kpiGrid">
+          <div class="kpi"><div class="k">Online</div><div class="v" id="kpiOnline">0</div><div class="d">Active sockets</div></div>
+          <div class="kpi"><div class="k">Waiting</div><div class="v" id="kpiWaiting">0</div><div class="d">Searching users</div></div>
+          <div class="kpi"><div class="k">Rooms</div><div class="v" id="kpiRooms">0</div><div class="d">Active rooms</div></div>
+          <div class="kpi"><div class="k">Messages</div><div class="v" id="kpiMessages">0</div><div class="d">Total (server)</div></div>
+        </div>
+
+        <div class="toolbar">
+          <div class="seg" id="viewSeg">
+            <button class="chip active" data-view="reports">Reports</button>
+            <button class="chip" data-view="leaderboard">Leaderboard</button>
+            <button class="chip" data-view="bans">Bans</button>
+          </div>
+          <div style="flex:1"></div>
+          <div class="badge2"><span class="mono" id="clock">--:--:--</span></div>
+        </div>
+
+        <div id="viewReports" class="view">
+          <div class="table">
+            <div class="thead">
+              <div>User</div><div>Reports</div><div style="text-align:right;">Actions</div>
+            </div>
+            <div id="reportsRows"></div>
+          </div>
+          <div id="reportsEmpty" class="empty" style="display:none;">No reports yet.</div>
+        </div>
+
+        <div id="viewLeaderboard" class="view" style="display:none;">
+          <div class="table">
+            <div class="thead">
+              <div>User</div><div>⭐ Avg</div><div style="text-align:right;">Votes</div>
+            </div>
+            <div id="lbRows"></div>
+          </div>
+          <div id="lbEmpty" class="empty" style="display:none;">No ratings yet.</div>
+        </div>
+
+        <div id="viewBans" class="view" style="display:none;">
+          <div class="split">
+            <div>
+              <div class="cardTitle" style="font-size:14px;">Ban user</div>
+              <div class="authRow">
+                <input id="banName" class="input sm" placeholder="Name to ban"/>
+                <button id="btnBan" class="btn danger sm">Ban</button>
+              </div>
+            </div>
+            <div>
+              <div class="cardTitle" style="font-size:14px;">Unban user</div>
+              <div class="authRow">
+                <input id="unbanName" class="input sm" placeholder="Name to unban"/>
+                <button id="btnUnban" class="btn sm">Unban</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="table" style="margin-top:12px;">
+            <div class="thead" style="grid-template-columns: 1.6fr .8fr;">
+              <div>Banned name</div><div style="text-align:right;">Action</div>
+            </div>
+            <div id="banRows"></div>
+          </div>
+          <div id="banEmpty" class="empty" style="display:none;">No bans.</div>
+        </div>
+      </section>
+
+      <aside class="rightCol">
+        <section class="card">
+          <div class="row spread">
+            <div class="lock">
+              <div class="lockIcon">🔐</div>
+              <div>
+                <div class="cardTitle" style="font-size:14px;">Admin Session</div>
+                <div class="cardSub">Local-only token</div>
+              </div>
+            </div>
+            <button id="btnLogoutAdmin" class="btn ghost">Logout</button>
+          </div>
+
+          <div class="row mt">
+            <div class="badge2"><span class="dot" id="connDot"></span><span id="connText">Connected</span></div>
+            <div class="badge2"><span class="mono" id="sessionKey">—</span></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="row spread">
+            <div>
+              <div class="cardTitle">Quick Actions</div>
+              <div class="cardSub">Fast moderation</div>
+            </div>
+          </div>
+
+          <div class="row mt">
+            <button id="btnPull" class="btn primary wide">Pull Snapshot</button>
+            <button id="btnLive" class="btn wide">Toggle Live</button>
+          </div>
+
+          <div class="small" style="margin-top:10px;">
+            Live mode updates automatically.
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <div class="toastWrap" id="toasts"></div>
+  </div>
+
+  <div class="authOverlay" id="authOverlay">
+    <div class="card authCard">
+      <div class="row spread">
+        <div class="lock">
+          <div class="lockIcon">🛡️</div>
+          <div>
+            <div class="cardTitle">Admin Access</div>
+            <div class="cardSub">Enter admin token to continue</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="authRow">
+        <input id="adminToken" class="input" placeholder="Admin token" autocomplete="off"/>
+        <button id="btnAuth" class="btn primary">Unlock</button>
+      </div>
+
+      <div id="authErr" class="error" style="margin-top:10px;"></div>
+      <div class="small" style="margin-top:10px;">Token is stored locally in your browser.</div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>
