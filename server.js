@@ -51,7 +51,7 @@ const STATIC_DIR = path.join(__dirname, "public");
 
 // ✅ ENV-only secrets
 const ADMIN_TOKEN = "Shahzod1602"// required for admin actions
-const GEMINI_API_KEY = "AIzaSyAJhlnPOzyrfkYDg_bt8R2Xh35dzFpywGQ" // required for AI coach
+const GEMINI_API_KEY = "AIzaSyBWJoLc1muSCPs1D8fX63Ihh5MYcbKDqXA" // required for AI coach
 
 // Gemini API
 const GEMINI_BASE = process.env.GEMINI_BASE || "https://generativelanguage.googleapis.com/v1beta";
