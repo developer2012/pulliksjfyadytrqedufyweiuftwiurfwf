@@ -1,41 +1,46 @@
 // server.js
 // ============================================================================
-// WonderTalk — PRO server.js (Express + Socket.IO + WebRTC + AI + Telegram users)
+// WonderTalk — PRO server.js (Express + Socket.IO + WebRTC + AI)
 // ----------------------------------------------------------------------------
-// KEY FEATURES:
-// - ENV-only secrets (NO hardcoded keys)
-// - Helmet security headers + compression
-// - CORS allowlist
-// - HTTP rate-limit + Socket event token bucket
-// - Room lifecycle + TTL cleanup
-// - Admin HTTP API (token) + Admin snapshot
-// - TURN/STUN config endpoint
-// - AI Coach (Gemini) w/ timeout guards
-// - ✅ Telegram integration:
-//    * POST /telegram/webhook (secure secret header) -> store /start users
-//    * Persist to data/tg_users.json
-//    * Optional Telegram WebApp initData verification on socket register
+// ✅ ENV-only secrets (NO hardcoded keys)
+// ✅ Open CORS (domainlarsiz)
+// ✅ Helmet + compression + HTTP rate-limit
+// ✅ Socket token bucket (events/messages/bytes)
+// ✅ Room lifecycle + TTL cleanup
+// ✅ Admin HTTP API (token) + Admin snapshot socket events
+// ✅ TURN/STUN config endpoint
+// ✅ AI Coach (Groq / xAI Grok / Gemini) with timeout guards + metrics
 //
 // Required ENV:
 //   ADMIN_TOKEN=supersecret
-//   GEMINI_API_KEY=xxxxx        (optional if AI used)
-//   TELEGRAM_BOT_TOKEN=123:abc  (recommended for initData verification)
-//   TG_WEBHOOK_SECRET=something (required if using webhook endpoint)
 //
 // Optional ENV:
-//   CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+//   AI_PROVIDER=groq | xai | gemini   (default: groq)
+//   GROQ_API_KEY=...
+//   GROQ_MODEL=llama-3.3-70b-versatile   (example; change as needed)
+//   GROQ_BASE_URL=https://api.groq.com/openai/v1
+//
+//   XAI_API_KEY=...
+//   XAI_MODEL=grok-4-fast-reasoning      (example; change to your available model)
+//   XAI_BASE_URL=https://api.x.ai/v1
+//
+//   GEMINI_API_KEY=...
+//   GEMINI_MODEL=gemini-2.5-flash
+//   GEMINI_BASE=https://generativelanguage.googleapis.com/v1beta
+//
+//   STUN_URL=stun:stun.l.google.com:19302
 //   TURN_URL=turn:... TURN_USER=... TURN_PASS=...
 //   FORCE_RELAY=true
-//   USERS_STORE_PATH=/var/data/tg_users.json
+//
+// Notes:
+// - Vercel serverless WebSocket/Socket.IO uchun ideal emas. Render/Railway/Fly/VM yaxshiroq.
+// - Node.js 18+ (global fetch bor) tavsiya.
 // ============================================================================
 
 "use strict";
 
-// Optional dotenv (only if you use .env locally). Safe even if package not installed.
 try { require("dotenv").config(); } catch {}
 
-const fs = require("fs");
-const fsp = fs.promises;
 const path = require("path");
 const http = require("http");
 const crypto = require("crypto");
@@ -47,41 +52,43 @@ const rateLimit = require("express-rate-limit");
 const { Server } = require("socket.io");
 
 /* ===================== ENV / Config ===================== */
-const NODE_ENV = process.env.NODE_ENV || "development";
+const NODE_ENV = (process.env.NODE_ENV || "development").trim();
 const IS_PROD = NODE_ENV === "production";
 
 const PORT = Number(process.env.PORT || 3000);
-const TRUST_PROXY = process.env.TRUST_PROXY || "1";
+const TRUST_PROXY = (process.env.TRUST_PROXY || "1").trim();
 const STATIC_DIR = path.join(__dirname, "public");
 
 // ✅ ENV-only secrets
-const ADMIN_TOKEN = "132312wewqd"
-const GEMINI_API_KEY = "AIzaSyBWJoLc1muSCPs1D8fX63Ihh5MYcbKDqXA"
+const ADMIN_TOKEN = "Shoxruzbekjonxon"
 
-// Telegram
-// Persistent store for TG users
-const USERS_STORE_PATH = (process.env.USERS_STORE_PATH || path.join(__dirname, "data", "tg_users.json")).trim();
-const USERS_STORE_DIR = path.dirname(USERS_STORE_PATH);
+// AI provider selection
+const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").trim().toLowerCase();
 
-// Gemini API
-const GEMINI_BASE = process.env.GEMINI_BASE || "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+// Groq (OpenAI-compatible)
+const GROQ_API_KEY = "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"
+const GROQ_BASE_URL = (process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1").trim();
+const GROQ_MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim(); // example default
+
+// xAI Grok (OpenAI-compatible style endpoints on api.x.ai)
+const XAI_API_KEY = (process.env.XAI_API_KEY || "").trim();
+const XAI_BASE_URL = (process.env.XAI_BASE_URL || "https://api.x.ai/v1").trim();
+const XAI_MODEL = (process.env.XAI_MODEL || "grok-4-fast-reasoning").trim(); // example default (set your available model)
+
+// Gemini
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim();
+const GEMINI_BASE = (process.env.GEMINI_BASE || "https://generativelanguage.googleapis.com/v1beta").trim();
+const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 
 // WebRTC ICE
-const STUN = process.env.STUN_URL || "stun:stun.l.google.com:19302";
+const STUN = (process.env.STUN_URL || "stun:stun.l.google.com:19302").trim();
 const TURN_URL = (process.env.TURN_URL || "").trim();
 const TURN_USER = (process.env.TURN_USER || "").trim();
 const TURN_PASS = (process.env.TURN_PASS || "").trim();
 const FORCE_RELAY = String(process.env.FORCE_RELAY || "").toLowerCase() === "true";
 
-// CORS allowlist
-const CORS_ORIGINS_RAW = (process.env.CORS_ORIGINS || "").trim();
-const CORS_ORIGINS = CORS_ORIGINS_RAW
-  ? CORS_ORIGINS_RAW.split(",").map((s) => s.trim()).filter(Boolean)
-  : ["*"]; // dev convenience
-
-/* -------- Limits -------- */
-const JSON_LIMIT = process.env.JSON_LIMIT || "1mb";
+// Limits
+const JSON_LIMIT = (process.env.JSON_LIMIT || "1mb").trim();
 const MAX_NAME_LEN = Number(process.env.MAX_NAME_LEN || 40);
 const MAX_MSG_LEN = Number(process.env.MAX_MSG_LEN || 2000);
 const ROOM_HISTORY_LIMIT = Number(process.env.ROOM_HISTORY_LIMIT || 80);
@@ -89,13 +96,16 @@ const WAITING_LIMIT = Number(process.env.WAITING_LIMIT || 2000);
 
 // Cleanup/TTL
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 1000 * 60 * 60);      // 1h
-const WAITING_TTL_MS = Number(process.env.WAITING_TTL_MS || 1000 * 60 * 10);// 10m
+const WAITING_TTL_MS = Number(process.env.WAITING_TTL_MS || 1000 * 60 * 10); // 10m
 const ROOM_IDLE_END_MS = Number(process.env.ROOM_IDLE_END_MS || 1000 * 60 * 12); // 12m
 
-// Socket rate-limits (token bucket / 10s)
+// Socket token bucket (per 10s)
 const SOCKET_EVENTS_PER_10S = Number(process.env.SOCKET_EVENTS_PER_10S || 140);
 const SOCKET_MSGS_PER_10S = Number(process.env.SOCKET_MSGS_PER_10S || 45);
 const SOCKET_BYTES_PER_10S = Number(process.env.SOCKET_BYTES_PER_10S || 60_000);
+
+// HTTP AI timeout
+const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 9000);
 
 /* -------- Questions -------- */
 const QUESTIONS = [
@@ -151,12 +161,25 @@ function userPublic(u) {
     name: u.name,
     gender: u.gender,
     level: u.level,
-    roomId: u.roomId || null,
-    tg: u.tg ? { id: u.tg.id, username: u.tg.username || null } : null
+    roomId: u.roomId || null
   };
 }
 
-/* ===================== Logger (JSON) ===================== */
+function textFromOpenAICompatChoice(json) {
+  const c = json?.choices?.[0];
+  const content = c?.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    // Some providers return structured content parts
+    return content
+      .map((p) => (typeof p === "string" ? p : p?.text || ""))
+      .filter(Boolean)
+      .join("");
+  }
+  return "";
+}
+
+/* ===================== Logger ===================== */
 function log(level, msg, meta) {
   const base = { ts: new Date().toISOString(), level, msg, env: NODE_ENV };
   console.log(JSON.stringify(meta ? { ...base, ...meta } : base));
@@ -164,151 +187,6 @@ function log(level, msg, meta) {
 const info = (m, meta) => log("info", m, meta);
 const warn = (m, meta) => log("warn", m, meta);
 const error = (m, meta) => log("error", m, meta);
-
-/* ===================== Telegram Store (persistent) ===================== */
-const tgStore = {
-  byId: new Map(), // id -> user
-  dirty: false,
-  saveTimer: null
-};
-
-function tgMakeName(u) {
-  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
-  return normalizeName(full || u.username || `TG-${u.id}`);
-}
-
-async function tgEnsureDir() {
-  try { await fsp.mkdir(USERS_STORE_DIR, { recursive: true }); } catch {}
-}
-
-async function tgLoadFromDisk() {
-  await tgEnsureDir();
-  try {
-    const raw = await fsp.readFile(USERS_STORE_PATH, "utf8");
-    const j = JSON.parse(raw);
-    const arr = Array.isArray(j?.users) ? j.users : [];
-    tgStore.byId.clear();
-    for (const x of arr) {
-      if (!x || !x.id) continue;
-      tgStore.byId.set(Number(x.id), x);
-    }
-    info("tg_store_loaded", { count: tgStore.byId.size, path: USERS_STORE_PATH });
-  } catch (e) {
-    // first run: file may not exist
-    info("tg_store_empty", { path: USERS_STORE_PATH });
-  }
-}
-
-async function tgSaveNow() {
-  if (!tgStore.dirty) return;
-  tgStore.dirty = false;
-
-  await tgEnsureDir();
-  const users = Array.from(tgStore.byId.values())
-    .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
-
-  const payload = JSON.stringify({ v: 1, savedAt: now(), users }, null, 2);
-  const tmp = USERS_STORE_PATH + ".tmp";
-
-  try {
-    await fsp.writeFile(tmp, payload, "utf8");
-    await fsp.rename(tmp, USERS_STORE_PATH);
-  } catch (e) {
-    tgStore.dirty = true; // retry later
-    error("tg_store_save_fail", { err: String(e?.message || e) });
-  }
-}
-
-function tgScheduleSave() {
-  tgStore.dirty = true;
-  if (tgStore.saveTimer) return;
-  tgStore.saveTimer = setTimeout(async () => {
-    tgStore.saveTimer = null;
-    await tgSaveNow();
-  }, 1200).unref();
-}
-
-function tgUpsertFromTelegramUser(u, source = "webhook", isStart = false) {
-  if (!u || typeof u.id !== "number") return null;
-  const id = Number(u.id);
-
-  const prev = tgStore.byId.get(id);
-  const name = tgMakeName(u);
-
-  const next = prev || {
-    id,
-    name,
-    username: u.username || null,
-    first_name: u.first_name || null,
-    last_name: u.last_name || null,
-    language_code: u.language_code || null,
-    firstSeenAt: now(),
-    lastSeenAt: now(),
-    starts: 0,
-    messages: 0,
-    source
-  };
-
-  next.name = name;
-  next.username = u.username || next.username || null;
-  next.first_name = u.first_name || next.first_name || null;
-  next.last_name = u.last_name || next.last_name || null;
-  next.language_code = u.language_code || next.language_code || null;
-  next.lastSeenAt = now();
-  next.source = source;
-
-  next.messages = (next.messages || 0) + 1;
-  if (isStart) next.starts = (next.starts || 0) + 1;
-
-  tgStore.byId.set(id, next);
-  tgScheduleSave();
-  return next;
-}
-
-/* ===================== Telegram initData verification ===================== */
-// Validate Telegram WebApp initData with bot token (recommended).
-// If TELEGRAM_BOT_TOKEN not set, we don't verify.
-function verifyTelegramInitData(initData, botToken, maxAgeSec = 24 * 60 * 60) {
-  try {
-    if (!initData || !botToken) return { ok: false, reason: "missing" };
-
-    const params = new URLSearchParams(initData);
-    const hash = params.get("hash");
-    if (!hash) return { ok: false, reason: "no_hash" };
-
-    const authDate = Number(params.get("auth_date") || "0");
-    if (!authDate) return { ok: false, reason: "no_auth_date" };
-
-    const age = Math.abs(Math.floor(Date.now() / 1000) - authDate);
-    if (maxAgeSec && age > maxAgeSec) return { ok: false, reason: "expired" };
-
-    // Build data_check_string: sort by key, exclude hash
-    const kv = [];
-    for (const [k, v] of params.entries()) {
-      if (k === "hash") continue;
-      kv.push([k, v]);
-    }
-    kv.sort((a, b) => a[0].localeCompare(b[0]));
-    const dataCheckString = kv.map(([k, v]) => `${k}=${v}`).join("\n");
-
-    // secret_key = HMAC_SHA256("WebAppData", bot_token)
-    const secretKey = crypto.createHmac("sha256", botToken).update("WebAppData").digest();
-    const calcHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
-
-    if (calcHash !== hash) return { ok: false, reason: "bad_hash" };
-
-    // user field is JSON string
-    let user = null;
-    const userRaw = params.get("user");
-    if (userRaw) {
-      try { user = JSON.parse(userRaw); } catch {}
-    }
-
-    return { ok: true, user, authDate };
-  } catch (e) {
-    return { ok: false, reason: "err" };
-  }
-}
 
 /* ===================== App / Server ===================== */
 const app = express();
@@ -319,30 +197,24 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(express.json({ limit: JSON_LIMIT }));
 
-/* ---------- HTTP Rate limit ---------- */
-app.use(rateLimit({
-  windowMs: 10 * 1000,
-  max: IS_PROD ? 250 : 1000,
-  standardHeaders: true,
-  legacyHeaders: false
-}));
-
-/* ---------- CORS ---------- */
+/* ---------- Open CORS (domainlarsiz) ---------- */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-
-  if (CORS_ORIGINS.includes("*")) {
-    res.setHeader("Access-Control-Allow-Origin", origin || "*");
-  } else if (origin && CORS_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-
+  res.setHeader("Access-Control-Allow-Origin", origin || "*");
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token, X-TG-Secret");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
+/* ---------- HTTP Rate limit ---------- */
+app.use(rateLimit({
+  windowMs: 10 * 1000,
+  max: IS_PROD ? 250 : 2000,
+  standardHeaders: true,
+  legacyHeaders: false
+}));
 
 /* ---------- Static ---------- */
 app.use(express.static(STATIC_DIR, {
@@ -350,14 +222,36 @@ app.use(express.static(STATIC_DIR, {
   etag: true
 }));
 
+/* ===================== In-memory State ===================== */
+const state = {
+  usersBySocket: new Map(), // socketId -> user
+  socketsByName: new Map(), // name -> socketId
+  bannedNames: new Set(),
+
+  waiting: [],              // { socketId, ts }
+  rooms: new Map(),         // roomId -> room
+
+  reportsByName: new Map(),
+  ratingsByName: new Map(),
+  totals: { visitors: 0, messages: 0, aiReplies: 0 },
+
+  buckets: new Map(),
+  metrics: {
+    aiProvider: AI_PROVIDER,
+    aiLatencyMsLast: 0,
+    aiLatencyMsMax5m: 0,
+    aiLatencyWindow: [],
+    aiErrors: 0
+  }
+};
+
 /* ---------- Health ---------- */
 app.get("/healthz", (req, res) => {
   res.json({
     ok: true,
     env: NODE_ENV,
     uptime: process.uptime(),
-    online: null,
-    tgUsers: tgStore.byId.size
+    online: state.usersBySocket.size
   });
 });
 
@@ -374,11 +268,11 @@ app.get("/webrtc-config", (req, res) => {
 app.get("/diag", (req, res) => {
   res.json({
     env: NODE_ENV,
+    aiProvider: AI_PROVIDER,
     stun: STUN,
     turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
     forceRelay: FORCE_RELAY,
-    cors: CORS_ORIGINS,
-    tgUsers: tgStore.byId.size
+    aiConfigured: getAiConfigured()
   });
 });
 
@@ -392,77 +286,35 @@ function adminHttpAuth(req, res) {
   return true;
 }
 
-app.get("/admin/tg/users", (req, res) => {
+app.get("/admin/stats", (req, res) => {
   if (!adminHttpAuth(req, res)) return;
-  const limit = clamp(Number(req.query?.limit || 200), 1, 5000);
-  const users = Array.from(tgStore.byId.values())
-    .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
-    .slice(0, limit);
-  res.json({ ok: true, count: tgStore.byId.size, users });
-});
-
-/* ===================== Telegram Webhook (store /start users) ===================== */
-// Telegram can send a header: x-telegram-bot-api-secret-token (if you set it on setWebhook).
-function tgWebhookAuth(req) {
-  if (!TG_WEBHOOK_SECRET) return false;
-  const h1 = String(req.headers["x-telegram-bot-api-secret-token"] || "").trim();
-  const h2 = String(req.headers["x-tg-secret"] || "").trim();
-  return (h1 && h1 === TG_WEBHOOK_SECRET) || (h2 && h2 === TG_WEBHOOK_SECRET);
-}
-
-app.post("/telegram/webhook", async (req, res) => {
-  if (!tgWebhookAuth(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
-
-  const upd = req.body || {};
-  // Common update shapes: message, edited_message, callback_query, etc.
-  const msg = upd.message || upd.edited_message || upd.channel_post || upd.edited_channel_post;
-  const from = msg?.from || upd.callback_query?.from || null;
-
-  if (from && typeof from.id === "number") {
-    const text = String(msg?.text || upd.callback_query?.data || "").trim();
-    const isStart = text.startsWith("/start");
-    tgUpsertFromTelegramUser(from, "webhook", isStart);
-  }
-
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    online: state.usersBySocket.size,
+    waiting: state.waiting.length,
+    rooms: state.rooms.size,
+    totals: { ...state.totals },
+    metrics: {
+      aiProvider: state.metrics.aiProvider,
+      aiLatencyMsLast: state.metrics.aiLatencyMsLast,
+      aiLatencyMsMax5m: state.metrics.aiLatencyMsMax5m,
+      aiErrors: state.metrics.aiErrors
+    }
+  });
 });
 
 /* ===================== Create server + Socket.IO ===================== */
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: {
-    origin: CORS_ORIGINS.includes("*") ? "*" : CORS_ORIGINS,
-    methods: ["GET", "POST"]
-  },
+  cors: { origin: true, methods: ["GET", "POST"] }, // open
   transports: ["websocket", "polling"],
   pingTimeout: 20000,
   pingInterval: 25000,
   maxHttpBufferSize: 1e6
 });
 
-/* ===================== In-memory State ===================== */
-const state = {
-  usersBySocket: new Map(),   // socketId -> user
-  socketsByName: new Map(),   // name -> socketId
-  socketsByTgId: new Map(),   // tgId -> socketId
-  bannedNames: new Set(),
-
-  waiting: [],                // {socketId, ts}
-  rooms: new Map(),           // roomId -> room
-
-  reportsByName: new Map(),
-  ratingsByName: new Map(),
-  totals: { visitors: 0, messages: 0, aiReplies: 0 },
-
-  buckets: new Map(),
-  metrics: {
-    aiLatencyMsLast: 0,
-    aiLatencyMsMax5m: 0,
-    aiLatencyWindow: []
-  }
-};
-
+/* ===================== Helpers: stats ===================== */
 function getOnlineCount() { return state.usersBySocket.size; }
 function getRoomsCount() { return state.rooms.size; }
 function getWaitingCount() { return state.waiting.length; }
@@ -489,8 +341,7 @@ function emitGlobalStats() {
     online: getOnlineCount(),
     waiting: getWaitingCount(),
     rooms: getRoomsCount(),
-    totals: { ...state.totals },
-    tgUsers: tgStore.byId.size
+    totals: { ...state.totals }
   });
 }
 
@@ -504,10 +355,11 @@ function emitAdminSnapshot(toSocketId = null) {
     banned: Array.from(state.bannedNames).sort((a, b) => a.localeCompare(b)),
     leaderboard: getRatingsLeaderboard(50),
     metrics: {
+      aiProvider: state.metrics.aiProvider,
       aiLatencyMsLast: state.metrics.aiLatencyMsLast,
-      aiLatencyMsMax5m: state.metrics.aiLatencyMsMax5m
-    },
-    tgUsers: tgStore.byId.size
+      aiLatencyMsMax5m: state.metrics.aiLatencyMsMax5m,
+      aiErrors: state.metrics.aiErrors
+    }
   };
   if (toSocketId) io.to(toSocketId).emit("admin:snapshot", payload);
   else io.emit("admin:snapshot", payload);
@@ -524,10 +376,7 @@ function roomOther(room, socketId) {
 }
 
 function safeLeaveRoomSocket(socketId, roomId) {
-  try {
-    const s = io.sockets.sockets.get(socketId);
-    if (s) s.leave(roomId);
-  } catch {}
+  try { io.sockets.sockets.get(socketId)?.leave(roomId); } catch {}
 }
 
 function endRoom(roomId, reason) {
@@ -625,9 +474,98 @@ function unbanName(name) {
   emitAdminSnapshot();
 }
 
-/* ===================== AI (Gemini) ===================== */
-async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = 9000 }) {
-  if (!GEMINI_API_KEY) return "AI is not configured. Ask admin to set GEMINI_API_KEY.";
+/* ===================== AI Provider Layer ===================== */
+function getAiConfigured() {
+  if (AI_PROVIDER === "groq") return !!GROQ_API_KEY;
+  if (AI_PROVIDER === "xai") return !!XAI_API_KEY;
+  if (AI_PROVIDER === "gemini") return !!GEMINI_API_KEY;
+  return false;
+}
+
+async function fetchJsonWithTimeout(url, opts = {}, timeoutMs = AI_TIMEOUT_MS) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { ...opts, signal: ac.signal });
+    const text = await resp.text().catch(() => "");
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    return { ok: resp.ok, status: resp.status, text, json };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function openAICompatChat({
+  baseURL,
+  apiKey,
+  model,
+  system,
+  user,
+  maxOutputTokens = 320,
+  temperature = 0.7,
+  timeoutMs = AI_TIMEOUT_MS
+}) {
+  if (!apiKey) return "AI is not configured. Missing API key.";
+
+  const url = `${baseURL.replace(/\/+$/, "")}/chat/completions`;
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: String(system || "") },
+      { role: "user", content: String(user || "") }
+    ],
+    temperature,
+    max_tokens: maxOutputTokens
+  };
+
+  try {
+    const { ok, status, text, json } = await fetchJsonWithTimeout(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body)
+    }, timeoutMs);
+
+    if (!ok) return `AI error: ${status} ${(text || "").slice(0, 500)}`;
+
+    const msg = textFromOpenAICompatChoice(json);
+    return String(msg || "AI: (no response)").trim().slice(0, 2500);
+  } catch (e) {
+    return `AI error: ${String(e?.message || "timeout or network issue")}`;
+  }
+}
+
+async function groqText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = AI_TIMEOUT_MS }) {
+  return openAICompatChat({
+    baseURL: GROQ_BASE_URL,
+    apiKey: GROQ_API_KEY,
+    model: GROQ_MODEL,
+    system,
+    user,
+    maxOutputTokens,
+    temperature,
+    timeoutMs
+  });
+}
+
+async function xaiText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = AI_TIMEOUT_MS }) {
+  return openAICompatChat({
+    baseURL: XAI_BASE_URL,
+    apiKey: XAI_API_KEY,
+    model: XAI_MODEL,
+    system,
+    user,
+    maxOutputTokens,
+    temperature,
+    timeoutMs
+  });
+}
+
+async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = AI_TIMEOUT_MS }) {
+  if (!GEMINI_API_KEY) return "AI is not configured. Missing GEMINI_API_KEY.";
 
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
   const body = {
@@ -635,38 +573,40 @@ async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0
     generationConfig: { temperature, maxOutputTokens }
   };
 
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-
   try {
-    const resp = await fetch(url, {
+    const { ok, status, text, json } = await fetchJsonWithTimeout(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: ac.signal
-    });
+      body: JSON.stringify(body)
+    }, timeoutMs);
 
-    if (!resp.ok) {
-      const t = await resp.text().catch(() => "");
-      return `AI error: ${resp.status} ${t}`.slice(0, 600);
-    }
+    if (!ok) return `AI error: ${status} ${(text || "").slice(0, 500)}`;
 
-    const json = await resp.json();
-    const text =
-      json?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join("") ||
+    const out =
+      json?.candidates?.[0]?.content?.parts?.map((p) => p?.text || "").filter(Boolean).join("") ||
       "AI: (no response)";
 
-    return String(text).trim().slice(0, 2500);
-  } catch {
-    return "AI error: timeout or network issue.";
-  } finally {
-    clearTimeout(timer);
+    return String(out).trim().slice(0, 2500);
+  } catch (e) {
+    return `AI error: ${String(e?.message || "timeout or network issue")}`;
   }
 }
 
-async function geminiJSON({ system, user, maxOutputTokens = 420, temperature = 0.35 }) {
-  const raw = await geminiText({ system, user, maxOutputTokens, temperature });
+async function aiText(opts) {
+  if (AI_PROVIDER === "groq") return groqText(opts);
+  if (AI_PROVIDER === "xai") return xaiText(opts);
+  if (AI_PROVIDER === "gemini") return geminiText(opts);
+  return `AI error: unsupported AI_PROVIDER "${AI_PROVIDER}"`;
+}
+
+async function aiJSON({ system, user, maxOutputTokens = 420, temperature = 0.35, timeoutMs = AI_TIMEOUT_MS }) {
+  const raw = await aiText({ system, user, maxOutputTokens, temperature, timeoutMs });
   const t = String(raw || "").trim();
+
+  // Try direct JSON parse
+  try { return JSON.parse(t); } catch {}
+
+  // Try extracting JSON object
   const first = t.indexOf("{");
   const last = t.lastIndexOf("}");
   if (first >= 0 && last > first) {
@@ -704,16 +644,7 @@ setInterval(() => {
   const cutoff = now() - 5 * 60 * 1000;
   while (win.length && win[0].ts < cutoff) win.shift();
   state.metrics.aiLatencyMsMax5m = win.reduce((m, x) => Math.max(m, x.ms), 0);
-
-  // periodic save (in case)
-  tgSaveNow().catch(() => {});
 }, 20_000).unref();
-
-/* ===================== Socket Middleware Guards ===================== */
-io.use((socket, next) => {
-  socket.data._registered = false;
-  next();
-});
 
 /* ===================== Socket.IO ===================== */
 io.on("connection", (socket) => {
@@ -724,8 +655,7 @@ io.on("connection", (socket) => {
   emitAdminSnapshot();
 
   function mustBeRegistered() {
-    const u = state.usersBySocket.get(socket.id);
-    return u || null;
+    return state.usersBySocket.get(socket.id) || null;
   }
 
   function touchRoomActivity(roomId) {
@@ -733,78 +663,16 @@ io.on("connection", (socket) => {
     if (r) r.lastActivityAt = now();
   }
 
-  // ✅ REGISTER (supports tgInitData verification)
-  socket.on("user:register", ({ name, tgInitData } = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify({ name: name ?? "", tgInitData: tgInitData ? "[tg]" : "" }));
+  /* ---------- Register ---------- */
+  socket.on("user:register", ({ name } = {}) => {
+    const bytes = Buffer.byteLength(JSON.stringify({ name: name ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
-
-    // If Telegram initData provided and bot token exists, verify and override name
-    let tgUser = null;
-    if (tgInitData && TELEGRAM_BOT_TOKEN) {
-      const v = verifyTelegramInitData(String(tgInitData), TELEGRAM_BOT_TOKEN, 24 * 60 * 60);
-      if (v.ok && v.user && typeof v.user.id === "number") {
-        tgUser = v.user;
-        name = tgMakeName(tgUser);
-        // store tg user in persistent list (source: webapp)
-        tgUpsertFromTelegramUser(tgUser, "webapp", false);
-      }
-    }
 
     const n = normalizeName(name);
     if (!n) return socket.emit("user:register:fail", { reason: "bad_name" });
     if (state.bannedNames.has(n)) return socket.emit("user:register:fail", { reason: "banned" });
 
-    // If this socket already registered -> rename flow
-    const existing = state.usersBySocket.get(socket.id);
-    if (existing) {
-      if (existing.roomId) endRoom(existing.roomId, "rename");
-      removeFromWaiting(socket.id);
-
-      if (state.socketsByName.get(existing.name) === socket.id) state.socketsByName.delete(existing.name);
-
-      // remove old tg mapping if any
-      if (existing.tg?.id && state.socketsByTgId.get(existing.tg.id) === socket.id) {
-        state.socketsByTgId.delete(existing.tg.id);
-      }
-
-      // Kick same-name session
-      const oldId = state.socketsByName.get(n);
-      if (oldId && oldId !== socket.id) {
-        const oldSock = io.sockets.sockets.get(oldId);
-        if (oldSock) {
-          try { oldSock.emit("user:kicked"); } catch {}
-          try { oldSock.disconnect(true); } catch {}
-        }
-      }
-
-      // Kick same Telegram ID session
-      if (tgUser?.id) {
-        const oldTgSockId = state.socketsByTgId.get(tgUser.id);
-        if (oldTgSockId && oldTgSockId !== socket.id) {
-          const oldSock = io.sockets.sockets.get(oldTgSockId);
-          if (oldSock) {
-            try { oldSock.emit("user:kicked"); } catch {}
-            try { oldSock.disconnect(true); } catch {}
-          }
-        }
-        state.socketsByTgId.set(tgUser.id, socket.id);
-        existing.tg = { id: tgUser.id, username: tgUser.username || null };
-      }
-
-      state.socketsByName.set(n, socket.id);
-
-      existing.name = n;
-      existing.roomId = null;
-      existing.searching = false;
-
-      socket.data._registered = true;
-      socket.emit("user:register:ok", { user: userPublic(existing), aiScore: existing.aiScore });
-      emitGlobalStats();
-      emitAdminSnapshot();
-      return;
-    }
-
-    // Initial register: kick same-name older session
+    // Kick same-name old session
     const oldId = state.socketsByName.get(n);
     if (oldId && oldId !== socket.id) {
       const oldSock = io.sockets.sockets.get(oldId);
@@ -814,17 +682,25 @@ io.on("connection", (socket) => {
       }
     }
 
-    // Initial register: kick same TG id older session
-    if (tgUser?.id) {
-      const oldTgSockId = state.socketsByTgId.get(tgUser.id);
-      if (oldTgSockId && oldTgSockId !== socket.id) {
-        const oldSock = io.sockets.sockets.get(oldTgSockId);
-        if (oldSock) {
-          try { oldSock.emit("user:kicked"); } catch {}
-          try { oldSock.disconnect(true); } catch {}
-        }
+    // Rename flow
+    const existing = state.usersBySocket.get(socket.id);
+    if (existing) {
+      if (existing.roomId) endRoom(existing.roomId, "rename");
+      removeFromWaiting(socket.id);
+
+      if (state.socketsByName.get(existing.name) === socket.id) {
+        state.socketsByName.delete(existing.name);
       }
-      state.socketsByTgId.set(tgUser.id, socket.id);
+
+      state.socketsByName.set(n, socket.id);
+      existing.name = n;
+      existing.roomId = null;
+      existing.searching = false;
+
+      socket.emit("user:register:ok", { user: userPublic(existing), aiScore: existing.aiScore });
+      emitGlobalStats();
+      emitAdminSnapshot();
+      return;
     }
 
     state.socketsByName.set(n, socket.id);
@@ -837,19 +713,16 @@ io.on("connection", (socket) => {
       roomId: null,
       searching: false,
       createdAt: now(),
-      aiScore: null,
-      tg: tgUser?.id ? { id: tgUser.id, username: tgUser.username || null } : null
+      aiScore: null
     };
 
     state.usersBySocket.set(socket.id, user);
-    socket.data._registered = true;
-
     socket.emit("user:register:ok", { user: userPublic(user), aiScore: user.aiScore });
     emitGlobalStats();
     emitAdminSnapshot();
   });
 
-  /* ---------- Match Start / Stop ---------- */
+  /* ---------- Match start ---------- */
   socket.on("match:start", ({ gender, level } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ gender: gender ?? "", level: level ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
@@ -865,7 +738,7 @@ io.on("connection", (socket) => {
     u.level = safeStr(level, 16) || "Any";
     u.searching = true;
 
-    // AI match
+    // AI match if user selects AI
     if (u.gender === "AI") {
       const roomId = makeRoomId(socket.id, "AI");
       state.rooms.set(roomId, {
@@ -934,13 +807,14 @@ io.on("connection", (socket) => {
 
       io.to(socket.id).emit("match:found", { roomId, partnerName: other.name, aiScore: u.aiScore });
       io.to(other.socketId).emit("match:found", { roomId, partnerName: u.name, aiScore: other.aiScore });
-
       io.to(roomId).emit("icebreaker:set", { roomId, index: 0 });
 
       emitGlobalStats();
       emitAdminSnapshot();
     } else {
-      if (state.waiting.length < WAITING_LIMIT) state.waiting.push({ socketId: socket.id, ts: now() });
+      if (state.waiting.length < WAITING_LIMIT) {
+        state.waiting.push({ socketId: socket.id, ts: now() });
+      }
       socket.emit("match:searching");
       emitGlobalStats();
       emitAdminSnapshot();
@@ -959,7 +833,7 @@ io.on("connection", (socket) => {
     emitAdminSnapshot();
   });
 
-  /* ---------- Icebreaker navigation ---------- */
+  /* ---------- Icebreaker nav ---------- */
   socket.on("icebreaker:nav", ({ roomId, dir } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", dir: dir ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
@@ -982,7 +856,7 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("icebreaker:set", { roomId, index: idx });
   });
 
-  /* ---------- Chat (Human & AI) ---------- */
+  /* ---------- Chat (human + AI) ---------- */
   socket.on("chat:message", async ({ roomId, text } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", text: text ?? "" }));
     if (!bucketTake(socket.id, "msg", bytes)) return;
@@ -1003,6 +877,7 @@ io.on("connection", (socket) => {
     room.history.push(msg);
     if (room.history.length > ROOM_HISTORY_LIMIT) room.history.shift();
 
+    // AI room
     if (room.ai) {
       socket.emit("chat:message", msg);
 
@@ -1020,37 +895,38 @@ io.on("connection", (socket) => {
         "English only. Keep it short, friendly.";
 
       const t0 = hrTimeMs();
-      const aiReply = await geminiText({
+      const aiReply = await aiText({
         system: sys,
         user: `Topic: ${room.topic || "general"}\nUser said: ${msgText}`,
         maxOutputTokens: 340,
-        temperature: 0.65
+        temperature: 0.65,
+        timeoutMs: AI_TIMEOUT_MS
       });
-      const t1 = hrTimeMs();
-      const dt = (t1 - t0);
+      const dt = hrTimeMs() - t0;
 
+      if (String(aiReply).startsWith("AI error:")) state.metrics.aiErrors++;
       state.totals.aiReplies++;
       state.metrics.aiLatencyMsLast = dt;
       state.metrics.aiLatencyWindow.push({ ts: now(), ms: dt });
 
-      const aiMsg = { from: "AI", text: aiReply, ts: now() };
+      const aiMsg = { from: "AI", text: String(aiReply).slice(0, 2500), ts: now() };
       room.history.push(aiMsg);
       if (room.history.length > ROOM_HISTORY_LIMIT) room.history.shift();
 
       setTimeout(() => socket.emit("chat:message", aiMsg), 120);
 
-      info("ai_reply", { ms: dt, roomId, user: u.name });
       emitGlobalStats();
       emitAdminSnapshot();
       return;
     }
 
+    // Human room
     io.to(roomId).emit("chat:message", msg);
     emitGlobalStats();
     emitAdminSnapshot();
   });
 
-  /* ---------- Leave (AI: generate report & score) ---------- */
+  /* ---------- Leave room (AI report on exit) ---------- */
   socket.on("room:leave", async () => {
     if (!bucketTake(socket.id, "event", 2)) return;
 
@@ -1082,11 +958,12 @@ io.on("connection", (socket) => {
         "}\n" +
         "English only. Be strict.";
 
-      const rep = await geminiJSON({
+      const rep = await aiJSON({
         system: sys,
         user: `User messages:\n${myMsgs || "(no messages)"}`,
         maxOutputTokens: 520,
-        temperature: 0.25
+        temperature: 0.25,
+        timeoutMs: AI_TIMEOUT_MS
       });
 
       const band = clamp(Number(rep.band) || 0, 0, 9);
@@ -1233,8 +1110,9 @@ io.on("connection", (socket) => {
 
     if (u) {
       state.usersBySocket.delete(socket.id);
-      if (state.socketsByName.get(u.name) === socket.id) state.socketsByName.delete(u.name);
-      if (u.tg?.id && state.socketsByTgId.get(u.tg.id) === socket.id) state.socketsByTgId.delete(u.tg.id);
+      if (state.socketsByName.get(u.name) === socket.id) {
+        state.socketsByName.delete(u.name);
+      }
     }
 
     state.buckets.delete(socket.id);
@@ -1247,34 +1125,30 @@ io.on("connection", (socket) => {
 });
 
 /* ===================== Start ===================== */
-(async function start() {
-  await tgLoadFromDisk();
-
-  server.listen(PORT, () => {
-    info("server_start", {
-      port: PORT,
-      env: NODE_ENV,
-      stun: STUN,
-      turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
-      forceRelay: FORCE_RELAY,
-      cors: CORS_ORIGINS,
-      tgUsers: tgStore.byId.size
-    });
-
-    if (!ADMIN_TOKEN) warn("ADMIN_TOKEN is missing — admin actions disabled.");
-    if (!GEMINI_API_KEY) warn("GEMINI_API_KEY is missing — AI Coach will reply with config warning.");
+server.listen(PORT, "0.0.0.0", () => {
+  info("server_start", {
+    port: PORT,
+    env: NODE_ENV,
+    aiProvider: AI_PROVIDER,
+    stun: STUN,
+    turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
+    forceRelay: FORCE_RELAY,
+    aiConfigured: getAiConfigured()
   });
-})();
+
+  if (!ADMIN_TOKEN) warn("ADMIN_TOKEN is missing — admin actions disabled.");
+
+  if (AI_PROVIDER === "groq" && !GROQ_API_KEY) warn("GROQ_API_KEY missing — AI replies will show config warning.");
+  if (AI_PROVIDER === "xai" && !XAI_API_KEY) warn("XAI_API_KEY missing — AI replies will show config warning.");
+  if (AI_PROVIDER === "gemini" && !GEMINI_API_KEY) warn("GEMINI_API_KEY missing — AI replies will show config warning.");
+});
 
 /* ===================== Graceful shutdown ===================== */
 function shutdown(signal) {
   warn("shutdown", { signal });
   try {
     io.close(() => {
-      server.close(async () => {
-        try { await tgSaveNow(); } catch {}
-        process.exit(0);
-      });
+      server.close(() => process.exit(0));
     });
   } catch {
     process.exit(0);
