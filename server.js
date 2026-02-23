@@ -1,57 +1,67 @@
 // server.js
 // ============================================================================
-// WonderTalk — PRODUCTION / SENIOR server.js (Express + Socket.IO + WebRTC + AI)
+// WonderTalk — PRO server.js (Express + Socket.IO + WebRTC + AI + Telegram users)
 // ----------------------------------------------------------------------------
-// ✅ Production hardening:
-//   - ENV-only secrets (NO hardcoded keys)
-//   - Helmet security headers
-//   - CORS allowlist
-//   - Rate-limit (HTTP + Socket events + chat flood guard)
-//   - Trust proxy (Render / Nginx)
-//   - Compression
-//   - Structured logging (JSON)
-//   - Graceful shutdown
-//   - Room lifecycle hardening + memory caps + cleanup TTL
-//   - Admin auth (token) for admin snapshot / ban / unban + HTTP API
-//   - TURN support + diagnostics (for “far friends voice” problem)
-//   - AI Coach (Gemini) with strict output + JSON parse guard
-//   - Register guard middleware (no anonymous socket actions)
+// KEY FEATURES:
+// - ENV-only secrets (NO hardcoded keys)
+// - Helmet security headers + compression
+// - CORS allowlist
+// - HTTP rate-limit + Socket event token bucket
+// - Room lifecycle + TTL cleanup
+// - Admin HTTP API (token) + Admin snapshot
+// - TURN/STUN config endpoint
+// - AI Coach (Gemini) w/ timeout guards
+// - ✅ Telegram integration:
+//    * POST /telegram/webhook (secure secret header) -> store /start users
+//    * Persist to data/tg_users.json
+//    * Optional Telegram WebApp initData verification on socket register
 //
-// ⚠️ IMPORTANT:
-//   - DO NOT hardcode GEMINI_API_KEY or ADMIN_TOKEN.
-//   - Put them into ENV on Render/local.
-//
-// Required ENV (production):
+// Required ENV:
 //   ADMIN_TOKEN=supersecret
-//   GEMINI_API_KEY=xxxxx
-// Optional:
+//   GEMINI_API_KEY=xxxxx        (optional if AI used)
+//   TELEGRAM_BOT_TOKEN=123:abc  (recommended for initData verification)
+//   TG_WEBHOOK_SECRET=something (required if using webhook endpoint)
+//
+// Optional ENV:
 //   CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
-//   TURN_URL=turn:...  TURN_USER=...  TURN_PASS=...
+//   TURN_URL=turn:... TURN_USER=... TURN_PASS=...
+//   FORCE_RELAY=true
+//   USERS_STORE_PATH=/var/data/tg_users.json
 // ============================================================================
 
 "use strict";
 
-/* ===================== Imports ===================== */
+// Optional dotenv (only if you use .env locally). Safe even if package not installed.
+try { require("dotenv").config(); } catch {}
+
+const fs = require("fs");
+const fsp = fs.promises;
 const path = require("path");
 const http = require("http");
+const crypto = require("crypto");
+
 const express = require("express");
 const helmet = require("helmet");
 const compression = require("compression");
 const rateLimit = require("express-rate-limit");
 const { Server } = require("socket.io");
-const crypto = require("crypto");
 
 /* ===================== ENV / Config ===================== */
 const NODE_ENV = process.env.NODE_ENV || "development";
 const IS_PROD = NODE_ENV === "production";
 
 const PORT = Number(process.env.PORT || 3000);
-const TRUST_PROXY = process.env.TRUST_PROXY || "1"; // Render: usually "1"
+const TRUST_PROXY = process.env.TRUST_PROXY || "1";
 const STATIC_DIR = path.join(__dirname, "public");
 
 // ✅ ENV-only secrets
-const ADMIN_TOKEN = "Shahzod1602"// required for admin actions
-const GEMINI_API_KEY = "AIzaSyBWJoLc1muSCPs1D8fX63Ihh5MYcbKDqXA" // required for AI coach
+const ADMIN_TOKEN = "132312wewqd"
+const GEMINI_API_KEY = "AIzaSyBWJoLc1muSCPs1D8fX63Ihh5MYcbKDqXA"
+
+// Telegram
+// Persistent store for TG users
+const USERS_STORE_PATH = (process.env.USERS_STORE_PATH || path.join(__dirname, "data", "tg_users.json")).trim();
+const USERS_STORE_DIR = path.dirname(USERS_STORE_PATH);
 
 // Gemini API
 const GEMINI_BASE = process.env.GEMINI_BASE || "https://generativelanguage.googleapis.com/v1beta";
@@ -59,18 +69,16 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 // WebRTC ICE
 const STUN = process.env.STUN_URL || "stun:stun.l.google.com:19302";
-
-// TURN (for far networks / NATs)
 const TURN_URL = (process.env.TURN_URL || "").trim();
 const TURN_USER = (process.env.TURN_USER || "").trim();
 const TURN_PASS = (process.env.TURN_PASS || "").trim();
 const FORCE_RELAY = String(process.env.FORCE_RELAY || "").toLowerCase() === "true";
 
-// CORS allowlist (comma separated domains)
+// CORS allowlist
 const CORS_ORIGINS_RAW = (process.env.CORS_ORIGINS || "").trim();
 const CORS_ORIGINS = CORS_ORIGINS_RAW
   ? CORS_ORIGINS_RAW.split(",").map((s) => s.trim()).filter(Boolean)
-  : ["*"]; // dev convenience (prod’da domen yoz)
+  : ["*"]; // dev convenience
 
 /* -------- Limits -------- */
 const JSON_LIMIT = process.env.JSON_LIMIT || "1mb";
@@ -80,14 +88,14 @@ const ROOM_HISTORY_LIMIT = Number(process.env.ROOM_HISTORY_LIMIT || 80);
 const WAITING_LIMIT = Number(process.env.WAITING_LIMIT || 2000);
 
 // Cleanup/TTL
-const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 1000 * 60 * 60); // 1h
-const WAITING_TTL_MS = Number(process.env.WAITING_TTL_MS || 1000 * 60 * 10); // 10m
-const ROOM_IDLE_END_MS = Number(process.env.ROOM_IDLE_END_MS || 1000 * 60 * 12); // 12m idle -> close
+const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 1000 * 60 * 60);      // 1h
+const WAITING_TTL_MS = Number(process.env.WAITING_TTL_MS || 1000 * 60 * 10);// 10m
+const ROOM_IDLE_END_MS = Number(process.env.ROOM_IDLE_END_MS || 1000 * 60 * 12); // 12m
 
-// Socket rate-limits (simple token bucket)
+// Socket rate-limits (token bucket / 10s)
 const SOCKET_EVENTS_PER_10S = Number(process.env.SOCKET_EVENTS_PER_10S || 140);
 const SOCKET_MSGS_PER_10S = Number(process.env.SOCKET_MSGS_PER_10S || 45);
-const SOCKET_BYTES_PER_10S = Number(process.env.SOCKET_BYTES_PER_10S || 60_000); // extra: payload bytes
+const SOCKET_BYTES_PER_10S = Number(process.env.SOCKET_BYTES_PER_10S || 60_000);
 
 /* -------- Questions -------- */
 const QUESTIONS = [
@@ -116,7 +124,6 @@ function safeStr(x, max = 80) {
 }
 
 function normalizeName(name) {
-  // simple normalization; you can harden later (allowlist chars)
   return safeStr(name, MAX_NAME_LEN).replace(/\s+/g, " ");
 }
 
@@ -126,7 +133,7 @@ function uid(n = 16) {
 
 function hrTimeMs() {
   const t = process.hrtime.bigint();
-  return Number(t / 1000000n); // ms
+  return Number(t / 1000000n);
 }
 
 function makeRoomId(a, b) {
@@ -140,28 +147,175 @@ function samePrefs(a, b) {
 }
 
 function userPublic(u) {
-  return { name: u.name, gender: u.gender, level: u.level, roomId: u.roomId || null };
+  return {
+    name: u.name,
+    gender: u.gender,
+    level: u.level,
+    roomId: u.roomId || null,
+    tg: u.tg ? { id: u.tg.id, username: u.tg.username || null } : null
+  };
 }
 
 /* ===================== Logger (JSON) ===================== */
 function log(level, msg, meta) {
   const base = { ts: new Date().toISOString(), level, msg, env: NODE_ENV };
-  const out = meta ? { ...base, ...meta } : base;
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify(out));
+  console.log(JSON.stringify(meta ? { ...base, ...meta } : base));
 }
 const info = (m, meta) => log("info", m, meta);
 const warn = (m, meta) => log("warn", m, meta);
 const error = (m, meta) => log("error", m, meta);
 
+/* ===================== Telegram Store (persistent) ===================== */
+const tgStore = {
+  byId: new Map(), // id -> user
+  dirty: false,
+  saveTimer: null
+};
+
+function tgMakeName(u) {
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  return normalizeName(full || u.username || `TG-${u.id}`);
+}
+
+async function tgEnsureDir() {
+  try { await fsp.mkdir(USERS_STORE_DIR, { recursive: true }); } catch {}
+}
+
+async function tgLoadFromDisk() {
+  await tgEnsureDir();
+  try {
+    const raw = await fsp.readFile(USERS_STORE_PATH, "utf8");
+    const j = JSON.parse(raw);
+    const arr = Array.isArray(j?.users) ? j.users : [];
+    tgStore.byId.clear();
+    for (const x of arr) {
+      if (!x || !x.id) continue;
+      tgStore.byId.set(Number(x.id), x);
+    }
+    info("tg_store_loaded", { count: tgStore.byId.size, path: USERS_STORE_PATH });
+  } catch (e) {
+    // first run: file may not exist
+    info("tg_store_empty", { path: USERS_STORE_PATH });
+  }
+}
+
+async function tgSaveNow() {
+  if (!tgStore.dirty) return;
+  tgStore.dirty = false;
+
+  await tgEnsureDir();
+  const users = Array.from(tgStore.byId.values())
+    .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
+
+  const payload = JSON.stringify({ v: 1, savedAt: now(), users }, null, 2);
+  const tmp = USERS_STORE_PATH + ".tmp";
+
+  try {
+    await fsp.writeFile(tmp, payload, "utf8");
+    await fsp.rename(tmp, USERS_STORE_PATH);
+  } catch (e) {
+    tgStore.dirty = true; // retry later
+    error("tg_store_save_fail", { err: String(e?.message || e) });
+  }
+}
+
+function tgScheduleSave() {
+  tgStore.dirty = true;
+  if (tgStore.saveTimer) return;
+  tgStore.saveTimer = setTimeout(async () => {
+    tgStore.saveTimer = null;
+    await tgSaveNow();
+  }, 1200).unref();
+}
+
+function tgUpsertFromTelegramUser(u, source = "webhook", isStart = false) {
+  if (!u || typeof u.id !== "number") return null;
+  const id = Number(u.id);
+
+  const prev = tgStore.byId.get(id);
+  const name = tgMakeName(u);
+
+  const next = prev || {
+    id,
+    name,
+    username: u.username || null,
+    first_name: u.first_name || null,
+    last_name: u.last_name || null,
+    language_code: u.language_code || null,
+    firstSeenAt: now(),
+    lastSeenAt: now(),
+    starts: 0,
+    messages: 0,
+    source
+  };
+
+  next.name = name;
+  next.username = u.username || next.username || null;
+  next.first_name = u.first_name || next.first_name || null;
+  next.last_name = u.last_name || next.last_name || null;
+  next.language_code = u.language_code || next.language_code || null;
+  next.lastSeenAt = now();
+  next.source = source;
+
+  next.messages = (next.messages || 0) + 1;
+  if (isStart) next.starts = (next.starts || 0) + 1;
+
+  tgStore.byId.set(id, next);
+  tgScheduleSave();
+  return next;
+}
+
+/* ===================== Telegram initData verification ===================== */
+// Validate Telegram WebApp initData with bot token (recommended).
+// If TELEGRAM_BOT_TOKEN not set, we don't verify.
+function verifyTelegramInitData(initData, botToken, maxAgeSec = 24 * 60 * 60) {
+  try {
+    if (!initData || !botToken) return { ok: false, reason: "missing" };
+
+    const params = new URLSearchParams(initData);
+    const hash = params.get("hash");
+    if (!hash) return { ok: false, reason: "no_hash" };
+
+    const authDate = Number(params.get("auth_date") || "0");
+    if (!authDate) return { ok: false, reason: "no_auth_date" };
+
+    const age = Math.abs(Math.floor(Date.now() / 1000) - authDate);
+    if (maxAgeSec && age > maxAgeSec) return { ok: false, reason: "expired" };
+
+    // Build data_check_string: sort by key, exclude hash
+    const kv = [];
+    for (const [k, v] of params.entries()) {
+      if (k === "hash") continue;
+      kv.push([k, v]);
+    }
+    kv.sort((a, b) => a[0].localeCompare(b[0]));
+    const dataCheckString = kv.map(([k, v]) => `${k}=${v}`).join("\n");
+
+    // secret_key = HMAC_SHA256("WebAppData", bot_token)
+    const secretKey = crypto.createHmac("sha256", botToken).update("WebAppData").digest();
+    const calcHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+
+    if (calcHash !== hash) return { ok: false, reason: "bad_hash" };
+
+    // user field is JSON string
+    let user = null;
+    const userRaw = params.get("user");
+    if (userRaw) {
+      try { user = JSON.parse(userRaw); } catch {}
+    }
+
+    return { ok: true, user, authDate };
+  } catch (e) {
+    return { ok: false, reason: "err" };
+  }
+}
+
 /* ===================== App / Server ===================== */
 const app = express();
 app.set("trust proxy", TRUST_PROXY);
+app.disable("x-powered-by");
 
-app.use(helmet({
-  // CSP off because: socket.io + local scripts; later can tighten
-  contentSecurityPolicy: false
-}));
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(express.json({ limit: JSON_LIMIT }));
 
@@ -173,7 +327,7 @@ app.use(rateLimit({
   legacyHeaders: false
 }));
 
-/* ---------- CORS (HTTP endpoints) ---------- */
+/* ---------- CORS ---------- */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
@@ -185,9 +339,8 @@ app.use((req, res, next) => {
 
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token, X-TG-Secret");
   if (req.method === "OPTIONS") return res.sendStatus(204);
-
   next();
 });
 
@@ -203,7 +356,8 @@ app.get("/healthz", (req, res) => {
     ok: true,
     env: NODE_ENV,
     uptime: process.uptime(),
-    online: null // socket stats below; keep fast
+    online: null,
+    tgUsers: tgStore.byId.size
   });
 });
 
@@ -216,15 +370,61 @@ app.get("/webrtc-config", (req, res) => {
   res.json({ iceServers, forceRelay: FORCE_RELAY });
 });
 
-/* ---------- Diagnostics for voice issues ---------- */
+/* ---------- Diagnostics ---------- */
 app.get("/diag", (req, res) => {
   res.json({
     env: NODE_ENV,
     stun: STUN,
     turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
     forceRelay: FORCE_RELAY,
-    cors: CORS_ORIGINS
+    cors: CORS_ORIGINS,
+    tgUsers: tgStore.byId.size
   });
+});
+
+/* ===================== Admin HTTP API (token) ===================== */
+function adminHttpAuth(req, res) {
+  const tok = String(req.headers["x-admin-token"] || "").trim();
+  if (!ADMIN_TOKEN || tok !== ADMIN_TOKEN) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+app.get("/admin/tg/users", (req, res) => {
+  if (!adminHttpAuth(req, res)) return;
+  const limit = clamp(Number(req.query?.limit || 200), 1, 5000);
+  const users = Array.from(tgStore.byId.values())
+    .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
+    .slice(0, limit);
+  res.json({ ok: true, count: tgStore.byId.size, users });
+});
+
+/* ===================== Telegram Webhook (store /start users) ===================== */
+// Telegram can send a header: x-telegram-bot-api-secret-token (if you set it on setWebhook).
+function tgWebhookAuth(req) {
+  if (!TG_WEBHOOK_SECRET) return false;
+  const h1 = String(req.headers["x-telegram-bot-api-secret-token"] || "").trim();
+  const h2 = String(req.headers["x-tg-secret"] || "").trim();
+  return (h1 && h1 === TG_WEBHOOK_SECRET) || (h2 && h2 === TG_WEBHOOK_SECRET);
+}
+
+app.post("/telegram/webhook", async (req, res) => {
+  if (!tgWebhookAuth(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
+
+  const upd = req.body || {};
+  // Common update shapes: message, edited_message, callback_query, etc.
+  const msg = upd.message || upd.edited_message || upd.channel_post || upd.edited_channel_post;
+  const from = msg?.from || upd.callback_query?.from || null;
+
+  if (from && typeof from.id === "number") {
+    const text = String(msg?.text || upd.callback_query?.data || "").trim();
+    const isStart = text.startsWith("/start");
+    tgUpsertFromTelegramUser(from, "webhook", isStart);
+  }
+
+  res.json({ ok: true });
 });
 
 /* ===================== Create server + Socket.IO ===================== */
@@ -243,26 +443,23 @@ const io = new Server(server, {
 
 /* ===================== In-memory State ===================== */
 const state = {
-  usersBySocket: new Map(),  // socketId -> user
-  socketsByName: new Map(),  // name -> socketId
-  bannedNames: new Set(),    // name
+  usersBySocket: new Map(),   // socketId -> user
+  socketsByName: new Map(),   // name -> socketId
+  socketsByTgId: new Map(),   // tgId -> socketId
+  bannedNames: new Set(),
 
-  waiting: [],               // {socketId, ts}
-  rooms: new Map(),          // roomId -> room
+  waiting: [],                // {socketId, ts}
+  rooms: new Map(),           // roomId -> room
 
-  reportsByName: new Map(),  // name -> count
-  ratingsByName: new Map(),  // name -> {sum,count}
-
+  reportsByName: new Map(),
+  ratingsByName: new Map(),
   totals: { visitors: 0, messages: 0, aiReplies: 0 },
 
-  // socket rate limit buckets: socketId -> {ts,eventCount,msgCount,byteCount}
   buckets: new Map(),
-
-  // metrics (rolling)
   metrics: {
     aiLatencyMsLast: 0,
     aiLatencyMsMax5m: 0,
-    aiLatencyWindow: [] // store last N latency
+    aiLatencyWindow: []
   }
 };
 
@@ -292,7 +489,8 @@ function emitGlobalStats() {
     online: getOnlineCount(),
     waiting: getWaitingCount(),
     rooms: getRoomsCount(),
-    totals: { ...state.totals }
+    totals: { ...state.totals },
+    tgUsers: tgStore.byId.size
   });
 }
 
@@ -308,77 +506,12 @@ function emitAdminSnapshot(toSocketId = null) {
     metrics: {
       aiLatencyMsLast: state.metrics.aiLatencyMsLast,
       aiLatencyMsMax5m: state.metrics.aiLatencyMsMax5m
-    }
+    },
+    tgUsers: tgStore.byId.size
   };
   if (toSocketId) io.to(toSocketId).emit("admin:snapshot", payload);
   else io.emit("admin:snapshot", payload);
 }
-
-/* ===================== Admin HTTP API (token) ===================== */
-function adminHttpAuth(req, res) {
-  const tok = String(req.headers["x-admin-token"] || "").trim();
-  if (!ADMIN_TOKEN || tok !== ADMIN_TOKEN) {
-    res.status(401).json({ ok: false, error: "unauthorized" });
-    return false;
-  }
-  return true;
-}
-
-app.get("/admin/stats", (req, res) => {
-  if (!adminHttpAuth(req, res)) return;
-  res.json({
-    ok: true,
-    online: getOnlineCount(),
-    waiting: getWaitingCount(),
-    rooms: getRoomsCount(),
-    totals: { ...state.totals },
-    metrics: { ...state.metrics },
-    leaderboardTop20: getRatingsLeaderboard(20)
-  });
-});
-
-app.get("/admin/rooms", (req, res) => {
-  if (!adminHttpAuth(req, res)) return;
-  const rooms = [];
-  for (const [id, r] of state.rooms.entries()) {
-    rooms.push({
-      id,
-      ai: !!r.ai,
-      createdAt: r.createdAt,
-      qIndex: r.qIndex,
-      a: r.a,
-      b: r.b,
-      historyLen: (r.history || []).length,
-      lastActivityAt: r.lastActivityAt || r.createdAt
-    });
-  }
-  rooms.sort((x, y) => (y.createdAt - x.createdAt));
-  res.json({ ok: true, rooms });
-});
-
-app.post("/admin/ban", (req, res) => {
-  if (!adminHttpAuth(req, res)) return;
-  const name = normalizeName(req.body?.name);
-  if (!name) return res.status(400).json({ ok: false, error: "bad_name" });
-  banName(name);
-  res.json({ ok: true });
-});
-
-app.post("/admin/unban", (req, res) => {
-  if (!adminHttpAuth(req, res)) return;
-  const name = normalizeName(req.body?.name);
-  if (!name) return res.status(400).json({ ok: false, error: "bad_name" });
-  unbanName(name);
-  res.json({ ok: true });
-});
-
-app.get("/admin/transcript", (req, res) => {
-  if (!adminHttpAuth(req, res)) return;
-  const roomId = String(req.query?.roomId || "").trim();
-  const r = state.rooms.get(roomId);
-  if (!r) return res.status(404).json({ ok: false, error: "not_found" });
-  res.json({ ok: true, roomId, ai: !!r.ai, history: r.history || [] });
-});
 
 /* ===================== Waiting / Room Helpers ===================== */
 function removeFromWaiting(socketId) {
@@ -426,7 +559,6 @@ function bucketTake(socketId, kind = "event", bytes = 0) {
   const t = now();
   const b = state.buckets.get(socketId) || { ts: t, eventCount: 0, msgCount: 0, byteCount: 0 };
 
-  // reset per 10s
   if (t - b.ts > 10_000) {
     b.ts = t;
     b.eventCount = 0;
@@ -435,23 +567,14 @@ function bucketTake(socketId, kind = "event", bytes = 0) {
   }
 
   b.byteCount += Math.max(0, Number(bytes) || 0);
-  if (b.byteCount > SOCKET_BYTES_PER_10S) {
-    state.buckets.set(socketId, b);
-    return false;
-  }
+  if (b.byteCount > SOCKET_BYTES_PER_10S) { state.buckets.set(socketId, b); return false; }
 
   if (kind === "msg") {
     b.msgCount += 1;
-    if (b.msgCount > SOCKET_MSGS_PER_10S) {
-      state.buckets.set(socketId, b);
-      return false;
-    }
+    if (b.msgCount > SOCKET_MSGS_PER_10S) { state.buckets.set(socketId, b); return false; }
   } else {
     b.eventCount += 1;
-    if (b.eventCount > SOCKET_EVENTS_PER_10S) {
-      state.buckets.set(socketId, b);
-      return false;
-    }
+    if (b.eventCount > SOCKET_EVENTS_PER_10S) { state.buckets.set(socketId, b); return false; }
   }
 
   state.buckets.set(socketId, b);
@@ -504,9 +627,7 @@ function unbanName(name) {
 
 /* ===================== AI (Gemini) ===================== */
 async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = 9000 }) {
-  if (!GEMINI_API_KEY) {
-    return "AI is not configured. Ask admin to set GEMINI_API_KEY.";
-  }
+  if (!GEMINI_API_KEY) return "AI is not configured. Ask admin to set GEMINI_API_KEY.";
 
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
   const body = {
@@ -518,7 +639,6 @@ async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0
   const timer = setTimeout(() => ac.abort(), timeoutMs);
 
   try {
-    // Node 18+ has global fetch. If not, upgrade Node or add undici.
     const resp = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -537,7 +657,7 @@ async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0
       "AI: (no response)";
 
     return String(text).trim().slice(0, 2500);
-  } catch (e) {
+  } catch {
     return "AI error: timeout or network issue.";
   } finally {
     clearTimeout(timer);
@@ -562,9 +682,7 @@ function cleanupWaiting() {
   if (!state.waiting.length) return;
 
   state.waiting = state.waiting.filter((w) => (t - w.ts) <= WAITING_TTL_MS);
-  if (state.waiting.length > WAITING_LIMIT) {
-    state.waiting = state.waiting.slice(0, WAITING_LIMIT);
-  }
+  if (state.waiting.length > WAITING_LIMIT) state.waiting = state.waiting.slice(0, WAITING_LIMIT);
 }
 
 function cleanupRooms() {
@@ -573,15 +691,8 @@ function cleanupRooms() {
     const createdAt = Number(room?.createdAt) || 0;
     const lastActivityAt = Number(room?.lastActivityAt) || createdAt;
 
-    if (createdAt && (t - createdAt) > ROOM_TTL_MS) {
-      endRoom(roomId, "timeout");
-      continue;
-    }
-
-    // Idle close (help memory)
-    if (lastActivityAt && (t - lastActivityAt) > ROOM_IDLE_END_MS) {
-      endRoom(roomId, "idle_timeout");
-    }
+    if (createdAt && (t - createdAt) > ROOM_TTL_MS) { endRoom(roomId, "timeout"); continue; }
+    if (lastActivityAt && (t - lastActivityAt) > ROOM_IDLE_END_MS) endRoom(roomId, "idle_timeout");
   }
 }
 
@@ -589,38 +700,32 @@ setInterval(() => {
   cleanupWaiting();
   cleanupRooms();
 
-  // roll AI latency max(5m)
   const win = state.metrics.aiLatencyWindow;
   const cutoff = now() - 5 * 60 * 1000;
   while (win.length && win[0].ts < cutoff) win.shift();
   state.metrics.aiLatencyMsMax5m = win.reduce((m, x) => Math.max(m, x.ms), 0);
+
+  // periodic save (in case)
+  tgSaveNow().catch(() => {});
 }, 20_000).unref();
 
 /* ===================== Socket Middleware Guards ===================== */
-function requireRegistered(socket, next) {
-  // allow connection, but block most actions until register
+io.use((socket, next) => {
   socket.data._registered = false;
   next();
-}
-
-io.use(requireRegistered);
+});
 
 /* ===================== Socket.IO ===================== */
 io.on("connection", (socket) => {
   state.totals.visitors++;
 
-  // send static questions
   socket.emit("global:questions", { questions: QUESTIONS });
-
   emitGlobalStats();
-  // admin snapshot to everyone is OK, but you can restrict in prod
   emitAdminSnapshot();
 
-  /* ---------- Helper: event guard ---------- */
   function mustBeRegistered() {
     const u = state.usersBySocket.get(socket.id);
-    if (!u) return null;
-    return u;
+    return u || null;
   }
 
   function touchRoomActivity(roomId) {
@@ -628,16 +733,78 @@ io.on("connection", (socket) => {
     if (r) r.lastActivityAt = now();
   }
 
-  /* ---------- Register ---------- */
-  socket.on("user:register", ({ name }) => {
-    const bytes = Buffer.byteLength(JSON.stringify({ name: name ?? "" }));
+  // ✅ REGISTER (supports tgInitData verification)
+  socket.on("user:register", ({ name, tgInitData } = {}) => {
+    const bytes = Buffer.byteLength(JSON.stringify({ name: name ?? "", tgInitData: tgInitData ? "[tg]" : "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
+
+    // If Telegram initData provided and bot token exists, verify and override name
+    let tgUser = null;
+    if (tgInitData && TELEGRAM_BOT_TOKEN) {
+      const v = verifyTelegramInitData(String(tgInitData), TELEGRAM_BOT_TOKEN, 24 * 60 * 60);
+      if (v.ok && v.user && typeof v.user.id === "number") {
+        tgUser = v.user;
+        name = tgMakeName(tgUser);
+        // store tg user in persistent list (source: webapp)
+        tgUpsertFromTelegramUser(tgUser, "webapp", false);
+      }
+    }
 
     const n = normalizeName(name);
     if (!n) return socket.emit("user:register:fail", { reason: "bad_name" });
     if (state.bannedNames.has(n)) return socket.emit("user:register:fail", { reason: "banned" });
 
-    // kick same-name older session
+    // If this socket already registered -> rename flow
+    const existing = state.usersBySocket.get(socket.id);
+    if (existing) {
+      if (existing.roomId) endRoom(existing.roomId, "rename");
+      removeFromWaiting(socket.id);
+
+      if (state.socketsByName.get(existing.name) === socket.id) state.socketsByName.delete(existing.name);
+
+      // remove old tg mapping if any
+      if (existing.tg?.id && state.socketsByTgId.get(existing.tg.id) === socket.id) {
+        state.socketsByTgId.delete(existing.tg.id);
+      }
+
+      // Kick same-name session
+      const oldId = state.socketsByName.get(n);
+      if (oldId && oldId !== socket.id) {
+        const oldSock = io.sockets.sockets.get(oldId);
+        if (oldSock) {
+          try { oldSock.emit("user:kicked"); } catch {}
+          try { oldSock.disconnect(true); } catch {}
+        }
+      }
+
+      // Kick same Telegram ID session
+      if (tgUser?.id) {
+        const oldTgSockId = state.socketsByTgId.get(tgUser.id);
+        if (oldTgSockId && oldTgSockId !== socket.id) {
+          const oldSock = io.sockets.sockets.get(oldTgSockId);
+          if (oldSock) {
+            try { oldSock.emit("user:kicked"); } catch {}
+            try { oldSock.disconnect(true); } catch {}
+          }
+        }
+        state.socketsByTgId.set(tgUser.id, socket.id);
+        existing.tg = { id: tgUser.id, username: tgUser.username || null };
+      }
+
+      state.socketsByName.set(n, socket.id);
+
+      existing.name = n;
+      existing.roomId = null;
+      existing.searching = false;
+
+      socket.data._registered = true;
+      socket.emit("user:register:ok", { user: userPublic(existing), aiScore: existing.aiScore });
+      emitGlobalStats();
+      emitAdminSnapshot();
+      return;
+    }
+
+    // Initial register: kick same-name older session
     const oldId = state.socketsByName.get(n);
     if (oldId && oldId !== socket.id) {
       const oldSock = io.sockets.sockets.get(oldId);
@@ -645,6 +812,19 @@ io.on("connection", (socket) => {
         try { oldSock.emit("user:kicked"); } catch {}
         try { oldSock.disconnect(true); } catch {}
       }
+    }
+
+    // Initial register: kick same TG id older session
+    if (tgUser?.id) {
+      const oldTgSockId = state.socketsByTgId.get(tgUser.id);
+      if (oldTgSockId && oldTgSockId !== socket.id) {
+        const oldSock = io.sockets.sockets.get(oldTgSockId);
+        if (oldSock) {
+          try { oldSock.emit("user:kicked"); } catch {}
+          try { oldSock.disconnect(true); } catch {}
+        }
+      }
+      state.socketsByTgId.set(tgUser.id, socket.id);
     }
 
     state.socketsByName.set(n, socket.id);
@@ -657,7 +837,8 @@ io.on("connection", (socket) => {
       roomId: null,
       searching: false,
       createdAt: now(),
-      aiScore: null
+      aiScore: null,
+      tg: tgUser?.id ? { id: tgUser.id, username: tgUser.username || null } : null
     };
 
     state.usersBySocket.set(socket.id, user);
@@ -669,7 +850,7 @@ io.on("connection", (socket) => {
   });
 
   /* ---------- Match Start / Stop ---------- */
-  socket.on("match:start", ({ gender, level }) => {
+  socket.on("match:start", ({ gender, level } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ gender: gender ?? "", level: level ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
 
@@ -677,7 +858,6 @@ io.on("connection", (socket) => {
     if (!u) return;
     if (state.bannedNames.has(u.name)) return socket.emit("user:banned");
 
-    // if in room, leave first
     if (u.roomId) leaveRoom(socket.id, "restart_search");
     removeFromWaiting(socket.id);
 
@@ -712,7 +892,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Human match: find compatible in waiting
+    // Human match
     cleanupWaiting();
 
     let foundIndex = -1;
@@ -760,10 +940,7 @@ io.on("connection", (socket) => {
       emitGlobalStats();
       emitAdminSnapshot();
     } else {
-      // put into waiting
-      if (state.waiting.length < WAITING_LIMIT) {
-        state.waiting.push({ socketId: socket.id, ts: now() });
-      }
+      if (state.waiting.length < WAITING_LIMIT) state.waiting.push({ socketId: socket.id, ts: now() });
       socket.emit("match:searching");
       emitGlobalStats();
       emitAdminSnapshot();
@@ -783,7 +960,7 @@ io.on("connection", (socket) => {
   });
 
   /* ---------- Icebreaker navigation ---------- */
-  socket.on("icebreaker:nav", ({ roomId, dir }) => {
+  socket.on("icebreaker:nav", ({ roomId, dir } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", dir: dir ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
 
@@ -806,7 +983,7 @@ io.on("connection", (socket) => {
   });
 
   /* ---------- Chat (Human & AI) ---------- */
-  socket.on("chat:message", async ({ roomId, text }) => {
+  socket.on("chat:message", async ({ roomId, text } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", text: text ?? "" }));
     if (!bucketTake(socket.id, "msg", bytes)) return;
 
@@ -826,11 +1003,9 @@ io.on("connection", (socket) => {
     room.history.push(msg);
     if (room.history.length > ROOM_HISTORY_LIMIT) room.history.shift();
 
-    // AI room: user message is sent back to user, then AI replies
     if (room.ai) {
       socket.emit("chat:message", msg);
 
-      // topic set
       if (!room.topic && msgText.trim().length >= 3) room.topic = msgText.trim();
 
       const sys =
@@ -870,7 +1045,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Human room: broadcast to both
     io.to(roomId).emit("chat:message", msg);
     emitGlobalStats();
     emitAdminSnapshot();
@@ -932,7 +1106,7 @@ io.on("connection", (socket) => {
   });
 
   /* ---------- Report / Rate (human only) ---------- */
-  socket.on("report:partner", ({ roomId }) => {
+  socket.on("report:partner", ({ roomId } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
 
@@ -951,7 +1125,7 @@ io.on("connection", (socket) => {
     emitAdminSnapshot();
   });
 
-  socket.on("rate:partner", ({ roomId, stars }) => {
+  socket.on("rate:partner", ({ roomId, stars } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", stars: stars ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
 
@@ -972,7 +1146,7 @@ io.on("connection", (socket) => {
   });
 
   /* ---------- WebRTC signaling (human only) ---------- */
-  socket.on("webrtc:offer", ({ roomId, sdp }) => {
+  socket.on("webrtc:offer", ({ roomId, sdp } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", sdp: sdp ? "[sdp]" : "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
 
@@ -989,7 +1163,7 @@ io.on("connection", (socket) => {
     io.to(otherId).emit("webrtc:offer", { sdp, from: u.name });
   });
 
-  socket.on("webrtc:answer", ({ roomId, sdp }) => {
+  socket.on("webrtc:answer", ({ roomId, sdp } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", sdp: sdp ? "[sdp]" : "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
 
@@ -1006,7 +1180,7 @@ io.on("connection", (socket) => {
     io.to(otherId).emit("webrtc:answer", { sdp, from: u.name });
   });
 
-  socket.on("webrtc:ice", ({ roomId, candidate }) => {
+  socket.on("webrtc:ice", ({ roomId, candidate } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", candidate: candidate ? "[ice]" : "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
 
@@ -1060,6 +1234,7 @@ io.on("connection", (socket) => {
     if (u) {
       state.usersBySocket.delete(socket.id);
       if (state.socketsByName.get(u.name) === socket.id) state.socketsByName.delete(u.name);
+      if (u.tg?.id && state.socketsByTgId.get(u.tg.id) === socket.id) state.socketsByTgId.delete(u.tg.id);
     }
 
     state.buckets.delete(socket.id);
@@ -1072,26 +1247,34 @@ io.on("connection", (socket) => {
 });
 
 /* ===================== Start ===================== */
-server.listen(PORT, () => {
-  info("server_start", {
-    port: PORT,
-    env: NODE_ENV,
-    stun: STUN,
-    turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
-    forceRelay: FORCE_RELAY,
-    cors: CORS_ORIGINS
-  });
+(async function start() {
+  await tgLoadFromDisk();
 
-  if (!ADMIN_TOKEN) warn("ADMIN_TOKEN is missing — admin actions will be disabled.");
-  if (!GEMINI_API_KEY) warn("GEMINI_API_KEY is missing — AI Coach will reply with config warning.");
-});
+  server.listen(PORT, () => {
+    info("server_start", {
+      port: PORT,
+      env: NODE_ENV,
+      stun: STUN,
+      turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
+      forceRelay: FORCE_RELAY,
+      cors: CORS_ORIGINS,
+      tgUsers: tgStore.byId.size
+    });
+
+    if (!ADMIN_TOKEN) warn("ADMIN_TOKEN is missing — admin actions disabled.");
+    if (!GEMINI_API_KEY) warn("GEMINI_API_KEY is missing — AI Coach will reply with config warning.");
+  });
+})();
 
 /* ===================== Graceful shutdown ===================== */
 function shutdown(signal) {
   warn("shutdown", { signal });
   try {
     io.close(() => {
-      server.close(() => process.exit(0));
+      server.close(async () => {
+        try { await tgSaveNow(); } catch {}
+        process.exit(0);
+      });
     });
   } catch {
     process.exit(0);
