@@ -1,10 +1,32 @@
-"use strict";
+// server.js
+// ============================================================================
+// WonderTalk — PRO server.js (Express + Socket.IO + WebRTC + AI)
+// ----------------------------------------------------------------------------
+// - ✅ "ENVsiz": hammasi kod ichida (Replit uchun qulay)
+// - ✅ Open CORS (reflect Origin / allow all)
+// - ✅ Helmet + compression + HTTP rate-limit
+// - ✅ Socket token bucket (events/messages/bytes)
+// - ✅ Room lifecycle + TTL cleanup
+// - ✅ Admin HTTP API (token) + Admin snapshot socket events
+// - ✅ TURN/STUN config endpoint
+// - ✅ AI Coach (Groq / xAI / Gemini) + timeout guards + metrics
+//
+// ⚠️ NOTE: Secrets (ADMIN_TOKEN, API keys) kod ichida bo‘ladi.
+//           GitHub’ga qo‘ymang. Keylarni ehtiyot qiling.
+//
+// Replit:
+// - Run: node server.js
+// - Port: Replit avtomatik process.env.PORT beradi (biz ham qo‘llab-quvvatlaymiz)
+//
+// ============================================================================
 
-try { require("dotenv").config(); } catch {}
+"use strict";
 
 const path = require("path");
 const http = require("http");
+const https = require("https");
 const crypto = require("crypto");
+const { URL } = require("url");
 
 const express = require("express");
 const helmet = require("helmet");
@@ -12,61 +34,61 @@ const compression = require("compression");
 const rateLimit = require("express-rate-limit");
 const { Server } = require("socket.io");
 
-/* ===================== ENV / Config ===================== */
+/* ===================== Config (ENVsiz) ===================== */
 const NODE_ENV = (process.env.NODE_ENV || "development").trim();
 const IS_PROD = NODE_ENV === "production";
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3000); // Replit ko‘pincha PORT beradi
 const TRUST_PROXY = (process.env.TRUST_PROXY || "1").trim();
 const STATIC_DIR = path.join(__dirname, "public");
 
-// ✅ ENV-only secrets
-const ADMIN_TOKEN = "Shoxruzbekjonxon"
+// ✅ ADMIN TOKEN (ENVsiz) — O'ZINGIZ QO'YING
+const ADMIN_TOKEN = "shoxruxjonxonbek";
 
-// AI provider selection
-const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").trim().toLowerCase();
+// AI provider selection (ENVsiz)
+const AI_PROVIDER = "groq"; // "groq" | "xai" | "gemini"
 
 // Groq (OpenAI-compatible)
-const GROQ_API_KEY = "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"
-const GROQ_BASE_URL = (process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1").trim();
-const GROQ_MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim(); // example default
+const GROQ_API_KEY = "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";
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 // xAI Grok (OpenAI-compatible style endpoints on api.x.ai)
-const XAI_API_KEY = (process.env.XAI_API_KEY || "").trim();
-const XAI_BASE_URL = (process.env.XAI_BASE_URL || "https://api.x.ai/v1").trim();
-const XAI_MODEL = (process.env.XAI_MODEL || "grok-4-fast-reasoning").trim(); // example default (set your available model)
+const XAI_API_KEY = "PASTE_YOUR_XAI_API_KEY_HERE";
+const XAI_BASE_URL = "https://api.x.ai/v1";
+const XAI_MODEL = "grok-4-fast-reasoning";
 
 // Gemini
-const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim();
-const GEMINI_BASE = (process.env.GEMINI_BASE || "https://generativelanguage.googleapis.com/v1beta").trim();
-const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+const GEMINI_API_KEY = "AIzaSyDKAtmJHMtPC6Ui56tFt7Ij0cPoP9gn8qs";
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 // WebRTC ICE
-const STUN = (process.env.STUN_URL || "stun:stun.l.google.com:19302").trim();
-const TURN_URL = (process.env.TURN_URL || "").trim();
-const TURN_USER = (process.env.TURN_USER || "").trim();
-const TURN_PASS = (process.env.TURN_PASS || "").trim();
-const FORCE_RELAY = String(process.env.FORCE_RELAY || "").toLowerCase() === "true";
+const STUN = "stun:stun.l.google.com:19302";
+const TURN_URL = "";  // masalan: "turn:your.turn.server:3478"
+const TURN_USER = "";
+const TURN_PASS = "";
+const FORCE_RELAY = false;
 
 // Limits
-const JSON_LIMIT = (process.env.JSON_LIMIT || "1mb").trim();
-const MAX_NAME_LEN = Number(process.env.MAX_NAME_LEN || 40);
-const MAX_MSG_LEN = Number(process.env.MAX_MSG_LEN || 2000);
-const ROOM_HISTORY_LIMIT = Number(process.env.ROOM_HISTORY_LIMIT || 80);
-const WAITING_LIMIT = Number(process.env.WAITING_LIMIT || 2000);
+const JSON_LIMIT = "1mb";
+const MAX_NAME_LEN = 40;
+const MAX_MSG_LEN = 2000;
+const ROOM_HISTORY_LIMIT = 80;
+const WAITING_LIMIT = 2000;
 
 // Cleanup/TTL
-const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 1000 * 60 * 60);      // 1h
-const WAITING_TTL_MS = Number(process.env.WAITING_TTL_MS || 1000 * 60 * 10); // 10m
-const ROOM_IDLE_END_MS = Number(process.env.ROOM_IDLE_END_MS || 1000 * 60 * 12); // 12m
+const ROOM_TTL_MS = 1000 * 60 * 60;       // 1h
+const WAITING_TTL_MS = 1000 * 60 * 10;    // 10m
+const ROOM_IDLE_END_MS = 1000 * 60 * 12;  // 12m
 
 // Socket token bucket (per 10s)
-const SOCKET_EVENTS_PER_10S = Number(process.env.SOCKET_EVENTS_PER_10S || 140);
-const SOCKET_MSGS_PER_10S = Number(process.env.SOCKET_MSGS_PER_10S || 45);
-const SOCKET_BYTES_PER_10S = Number(process.env.SOCKET_BYTES_PER_10S || 60_000);
+const SOCKET_EVENTS_PER_10S = 140;
+const SOCKET_MSGS_PER_10S = 45;
+const SOCKET_BYTES_PER_10S = 60_000;
 
 // HTTP AI timeout
-const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 9000);
+const AI_TIMEOUT_MS = 9000;
 
 /* -------- Questions -------- */
 const QUESTIONS = [
@@ -131,7 +153,6 @@ function textFromOpenAICompatChoice(json) {
   const content = c?.message?.content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    // Some providers return structured content parts
     return content
       .map((p) => (typeof p === "string" ? p : p?.text || ""))
       .filter(Boolean)
@@ -435,26 +456,67 @@ function unbanName(name) {
   emitAdminSnapshot();
 }
 
-/* ===================== AI Provider Layer ===================== */
-function getAiConfigured() {
-  if (AI_PROVIDER === "groq") return !!GROQ_API_KEY;
-  if (AI_PROVIDER === "xai") return !!XAI_API_KEY;
-  if (AI_PROVIDER === "gemini") return !!GEMINI_API_KEY;
-  return false;
+/* ===================== HTTP client (fetchsiz) ===================== */
+function httpRequestWithTimeout(urlStr, opts = {}, timeoutMs = AI_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const u = new URL(urlStr);
+    const lib = u.protocol === "https:" ? https : http;
+
+    const method = (opts.method || "GET").toUpperCase();
+    const headers = Object.assign({}, opts.headers || {});
+    const body = opts.body != null ? String(opts.body) : null;
+
+    if (body != null && !headers["content-length"] && !headers["Content-Length"]) {
+      headers["content-length"] = Buffer.byteLength(body);
+    }
+
+    const req = lib.request({
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port || (u.protocol === "https:" ? 443 : 80),
+      path: u.pathname + (u.search || ""),
+      method,
+      headers
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (d) => chunks.push(d));
+      res.on("end", () => {
+        if (timedOut) return;
+        const text = Buffer.concat(chunks).toString("utf8");
+        let json = null;
+        try { json = text ? JSON.parse(text) : null; } catch {}
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode || 0,
+          text,
+          json
+        });
+      });
+    });
+
+    req.on("error", (err) => {
+      if (timedOut) return;
+      reject(err);
+    });
+
+    req.setTimeout(timeoutMs, () => {
+      timedOut = true;
+      try { req.destroy(new Error("timeout")); } catch {}
+      reject(new Error("timeout"));
+    });
+
+    if (body != null) req.write(body);
+    req.end();
+  });
 }
 
-async function fetchJsonWithTimeout(url, opts = {}, timeoutMs = AI_TIMEOUT_MS) {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const resp = await fetch(url, { ...opts, signal: ac.signal });
-    const text = await resp.text().catch(() => "");
-    let json = null;
-    try { json = text ? JSON.parse(text) : null; } catch {}
-    return { ok: resp.ok, status: resp.status, text, json };
-  } finally {
-    clearTimeout(timer);
-  }
+/* ===================== AI Provider Layer ===================== */
+function getAiConfigured() {
+  if (AI_PROVIDER === "groq") return !!GROQ_API_KEY && !String(GROQ_API_KEY).includes("PASTE_YOUR");
+  if (AI_PROVIDER === "xai") return !!XAI_API_KEY && !String(XAI_API_KEY).includes("PASTE_YOUR");
+  if (AI_PROVIDER === "gemini") return !!GEMINI_API_KEY && !String(GEMINI_API_KEY).includes("PASTE_YOUR");
+  return false;
 }
 
 async function openAICompatChat({
@@ -467,9 +529,9 @@ async function openAICompatChat({
   temperature = 0.7,
   timeoutMs = AI_TIMEOUT_MS
 }) {
-  if (!apiKey) return "AI is not configured. Missing API key.";
+  if (!apiKey || String(apiKey).includes("PASTE_YOUR")) return "AI is not configured. Missing API key.";
 
-  const url = `${baseURL.replace(/\/+$/, "")}/chat/completions`;
+  const url = `${String(baseURL).replace(/\/+$/, "")}/chat/completions`;
   const body = {
     model,
     messages: [
@@ -481,7 +543,7 @@ async function openAICompatChat({
   };
 
   try {
-    const { ok, status, text, json } = await fetchJsonWithTimeout(url, {
+    const { ok, status, text, json } = await httpRequestWithTimeout(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -526,7 +588,7 @@ async function xaiText({ system, user, maxOutputTokens = 320, temperature = 0.7,
 }
 
 async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = AI_TIMEOUT_MS }) {
-  if (!GEMINI_API_KEY) return "AI is not configured. Missing GEMINI_API_KEY.";
+  if (!GEMINI_API_KEY || String(GEMINI_API_KEY).includes("PASTE_YOUR")) return "AI is not configured. Missing GEMINI_API_KEY.";
 
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
   const body = {
@@ -535,7 +597,7 @@ async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0
   };
 
   try {
-    const { ok, status, text, json } = await fetchJsonWithTimeout(url, {
+    const { ok, status, text, json } = await httpRequestWithTimeout(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body)
@@ -564,10 +626,8 @@ async function aiJSON({ system, user, maxOutputTokens = 420, temperature = 0.35,
   const raw = await aiText({ system, user, maxOutputTokens, temperature, timeoutMs });
   const t = String(raw || "").trim();
 
-  // Try direct JSON parse
   try { return JSON.parse(t); } catch {}
 
-  // Try extracting JSON object
   const first = t.indexOf("{");
   const last = t.lastIndexOf("}");
   if (first >= 0 && last > first) {
@@ -1097,11 +1157,10 @@ server.listen(PORT, "0.0.0.0", () => {
     aiConfigured: getAiConfigured()
   });
 
-  if (!ADMIN_TOKEN) warn("ADMIN_TOKEN is missing — admin actions disabled.");
-
-  if (AI_PROVIDER === "groq" && !GROQ_API_KEY) warn("GROQ_API_KEY missing — AI replies will show config warning.");
-  if (AI_PROVIDER === "xai" && !XAI_API_KEY) warn("XAI_API_KEY missing — AI replies will show config warning.");
-  if (AI_PROVIDER === "gemini" && !GEMINI_API_KEY) warn("GEMINI_API_KEY missing — AI replies will show config warning.");
+  if (!ADMIN_TOKEN || String(ADMIN_TOKEN).includes("PASTE_YOUR")) warn("ADMIN_TOKEN is missing — admin actions disabled.");
+  if (AI_PROVIDER === "groq" && (!GROQ_API_KEY || String(GROQ_API_KEY).includes("PASTE_YOUR"))) warn("GROQ_API_KEY missing — AI replies will show config warning.");
+  if (AI_PROVIDER === "xai" && (!XAI_API_KEY || String(XAI_API_KEY).includes("PASTE_YOUR"))) warn("XAI_API_KEY missing — AI replies will show config warning.");
+  if (AI_PROVIDER === "gemini" && (!GEMINI_API_KEY || String(GEMINI_API_KEY).includes("PASTE_YOUR"))) warn("GEMINI_API_KEY missing — AI replies will show config warning.");
 });
 
 /* ===================== Graceful shutdown ===================== */
