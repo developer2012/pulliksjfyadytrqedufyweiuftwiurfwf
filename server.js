@@ -51,7 +51,7 @@ const AI_PROVIDER = "groq"; // "groq" | "xai" | "gemini"
 // Groq (OpenAI-compatible)
 const GROQ_API_KEY = "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";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODEL = "llama-3.3-70b-versatile"; 
 
 // xAI Grok (OpenAI-compatible style endpoints on api.x.ai)
 const XAI_API_KEY = "PASTE_YOUR_XAI_API_KEY_HERE";
