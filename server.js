@@ -54,12 +54,12 @@ const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const GROQ_MODEL = "llama-3.3-70b-versatile"; 
 
 // xAI Grok (OpenAI-compatible style endpoints on api.x.ai)
-const XAI_API_KEY = "PASTE_YOUR_XAI_API_KEY_HERE";
+const XAI_API_KEY = "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";
 const XAI_BASE_URL = "https://api.x.ai/v1";
 const XAI_MODEL = "grok-4-fast-reasoning";
 
 // Gemini
-const GEMINI_API_KEY = "AIzaSyDKAtmJHMtPC6Ui56tFt7Ij0cPoP9gn8qs";
+const GEMINI_API_KEY = "AIzaSyDdKw6dpcjjPWrIiGJ_y86uPXkH827Q9mk";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_MODEL = "gemini-2.5-flash";
 
