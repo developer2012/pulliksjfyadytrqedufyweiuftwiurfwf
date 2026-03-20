@@ -1,176 +1,179 @@
-// server.js
-// ============================================================================
-// WonderTalk — PRO server.js (Express + Socket.IO + WebRTC + AI)
-// ----------------------------------------------------------------------------
-// - ✅ "ENVsiz": hammasi kod ichida (Replit uchun qulay)
-// - ✅ Open CORS (reflect Origin / allow all)
-// - ✅ Helmet + compression + HTTP rate-limit
-// - ✅ Socket token bucket (events/messages/bytes)
-// - ✅ Room lifecycle + TTL cleanup
-// - ✅ Admin HTTP API (token) + Admin snapshot socket events
-// - ✅ TURN/STUN config endpoint
-// - ✅ AI Coach (Groq / xAI / Gemini) + timeout guards + metrics
+// ============================================================
+//  WonderTalk — server.js
+//  Express + Socket.IO + WebRTC signaling + AI Coach (Groq)
+// ============================================================
 //
-// ⚠️ NOTE: Secrets (ADMIN_TOKEN, API keys) kod ichida bo‘ladi.
-//           GitHub’ga qo‘ymang. Keylarni ehtiyot qiling.
+//  Required ENV:
+//    ADMIN_TOKEN=...           admin socket/HTTP auth
 //
-// Replit:
-// - Run: node server.js
-// - Port: Replit avtomatik process.env.PORT beradi (biz ham qo‘llab-quvvatlaymiz)
+//  AI (pick one provider):
+//    AI_PROVIDER=groq|xai|gemini        (default: groq)
 //
-// ============================================================================
+//    GROQ_API_KEY=...
+//    GROQ_MODEL=llama-3.3-70b-versatile  (default)
+//    GROQ_BASE_URL=https://api.groq.com/openai/v1
+//
+//    XAI_API_KEY=...
+//    XAI_MODEL=grok-3-fast
+//    XAI_BASE_URL=https://api.x.ai/v1
+//
+//    GEMINI_API_KEY=...
+//    GEMINI_MODEL=gemini-2.5-flash
+//    GEMINI_BASE=https://generativelanguage.googleapis.com/v1beta
+//
+//  WebRTC:
+//    STUN_URL=stun:stun.l.google.com:19302
+//    TURN_URL=turn:...  TURN_USER=...  TURN_PASS=...
+//    FORCE_RELAY=true
+//
+//  Optional:
+//    PORT=3000
+//    NODE_ENV=production
+//    TRUST_PROXY=1
+//    JSON_LIMIT=1mb
+//    MAX_NAME_LEN=40
+//    MAX_MSG_LEN=2000
+//    ROOM_HISTORY=80
+//    ROOM_TTL_MS=3600000        (1h)
+//    ROOM_IDLE_MS=720000        (12m)
+//    WAITING_TTL_MS=600000      (10m)
+//    WAITING_LIMIT=2000
+//    SOCKET_EVENTS_PER_10S=140
+//    SOCKET_MSGS_PER_10S=45
+//    SOCKET_BYTES_PER_10S=60000
+//    AI_TIMEOUT_MS=9000
+// ============================================================
 
 "use strict";
 
-const path = require("path");
-const http = require("http");
-const https = require("https");
+try { require("dotenv").config(); } catch (_) {}
+
+const path   = require("path");
+const http   = require("http");
 const crypto = require("crypto");
-const { URL } = require("url");
 
-const express = require("express");
-const helmet = require("helmet");
+const express     = require("express");
+const helmet      = require("helmet");
 const compression = require("compression");
-const rateLimit = require("express-rate-limit");
-const { Server } = require("socket.io");
+const rateLimit   = require("express-rate-limit");
+const { Server }  = require("socket.io");
 
-/* ===================== Config (ENVsiz) ===================== */
-const NODE_ENV = (process.env.NODE_ENV || "development").trim();
-const IS_PROD = NODE_ENV === "production";
-
-const PORT = Number(process.env.PORT || 3000); // Replit ko‘pincha PORT beradi
-const TRUST_PROXY = (process.env.TRUST_PROXY || "1").trim();
+/* ──────────────────────────────────────────────────────────
+   ENV
+────────────────────────────────────────────────────────── */
+const NODE_ENV   = (process.env.NODE_ENV   || "development").trim();
+const IS_PROD    = NODE_ENV === "production";
+const PORT       = Number(process.env.PORT || 3000);
+const TRUST_PROXY= (process.env.TRUST_PROXY || "1").trim();
 const STATIC_DIR = path.join(__dirname, "public");
+const JSON_LIMIT = process.env.JSON_LIMIT || "1mb";
 
-// ✅ ADMIN TOKEN (ENVsiz) — O'ZINGIZ QO'YING
-const ADMIN_TOKEN = "shoxruxjonxonbek";
+/* Admin */
+const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || "").trim();
 
-// AI provider selection (ENVsiz)
-const AI_PROVIDER = "groq"; // "groq" | "xai" | "gemini"
+/* AI */
+const AI_PROVIDER    = (process.env.AI_PROVIDER   || "groq").trim().toLowerCase();
+const AI_TIMEOUT_MS  = Number(process.env.AI_TIMEOUT_MS || 9000);
 
-// Groq (OpenAI-compatible)
-const GROQ_API_KEY = "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";
-const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
-const GROQ_MODEL = "llama-3.3-70b-versatile"; 
+const GROQ_API_KEY   = "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"
+const GROQ_BASE_URL  =  "https://api.groq.com/openai/v1"
+const GROQ_MODEL     = "llama-3.3-70b-versatile"
 
-// xAI Grok (OpenAI-compatible style endpoints on api.x.ai)
-const XAI_API_KEY = "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";
-const XAI_BASE_URL = "https://api.x.ai/v1";
-const XAI_MODEL = "grok-4-fast-reasoning";
+const XAI_API_KEY    = (process.env.XAI_API_KEY    || "").trim();
+const XAI_BASE_URL   = (process.env.XAI_BASE_URL   || "https://api.x.ai/v1").trim();
+const XAI_MODEL      = (process.env.XAI_MODEL      || "grok-3-fast").trim();
 
-// Gemini
-const GEMINI_API_KEY = "AIzaSyDdKw6dpcjjPWrIiGJ_y86uPXkH827Q9mk";
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim();
+const GEMINI_BASE    = (process.env.GEMINI_BASE    || "https://generativelanguage.googleapis.com/v1beta").trim();
+const GEMINI_MODEL   = (process.env.GEMINI_MODEL   || "gemini-2.5-flash").trim();
 
-// WebRTC ICE
-const STUN = "stun:stun.l.google.com:19302";
-const TURN_URL = "";  // masalan: "turn:your.turn.server:3478"
-const TURN_USER = "";
-const TURN_PASS = "";
-const FORCE_RELAY = false;
+/* WebRTC */
+const STUN       = (process.env.STUN_URL  || "stun:stun.l.google.com:19302").trim();
+const TURN_URL   = (process.env.TURN_URL  || "").trim();
+const TURN_USER  = (process.env.TURN_USER || "").trim();
+const TURN_PASS  = (process.env.TURN_PASS || "").trim();
+const FORCE_RELAY= String(process.env.FORCE_RELAY || "").toLowerCase() === "true";
 
-// Limits
-const JSON_LIMIT = "1mb";
-const MAX_NAME_LEN = 40;
-const MAX_MSG_LEN = 2000;
-const ROOM_HISTORY_LIMIT = 80;
-const WAITING_LIMIT = 2000;
+/* Limits */
+const MAX_NAME_LEN = Number(process.env.MAX_NAME_LEN || 40);
+const MAX_MSG_LEN  = Number(process.env.MAX_MSG_LEN  || 2000);
+const ROOM_HISTORY = Number(process.env.ROOM_HISTORY || 80);
+const WAITING_LIMIT= Number(process.env.WAITING_LIMIT|| 2000);
 
-// Cleanup/TTL
-const ROOM_TTL_MS = 1000 * 60 * 60;       // 1h
-const WAITING_TTL_MS = 1000 * 60 * 10;    // 10m
-const ROOM_IDLE_END_MS = 1000 * 60 * 12;  // 12m
+/* TTLs */
+const ROOM_TTL_MS   = Number(process.env.ROOM_TTL_MS   || 60 * 60 * 1000);   // 1 h
+const ROOM_IDLE_MS  = Number(process.env.ROOM_IDLE_MS  || 12 * 60 * 1000);   // 12 m
+const WAITING_TTL_MS= Number(process.env.WAITING_TTL_MS|| 10 * 60 * 1000);   // 10 m
 
-// Socket token bucket (per 10s)
-const SOCKET_EVENTS_PER_10S = 140;
-const SOCKET_MSGS_PER_10S = 45;
-const SOCKET_BYTES_PER_10S = 60_000;
+/* Socket token bucket per 10 s */
+const SOCK_EV_PER_10S  = Number(process.env.SOCKET_EVENTS_PER_10S || 140);
+const SOCK_MSG_PER_10S = Number(process.env.SOCKET_MSGS_PER_10S   || 45);
+const SOCK_BY_PER_10S  = Number(process.env.SOCKET_BYTES_PER_10S  || 60_000);
 
-// HTTP AI timeout
-const AI_TIMEOUT_MS = 9000;
-
-/* -------- Questions -------- */
+/* ──────────────────────────────────────────────────────────
+   ICEBREAKER QUESTIONS
+────────────────────────────────────────────────────────── */
 const QUESTIONS = [
   "What is your hobby, and why do you enjoy it?",
   "Where do you live, and what do you like about that place?",
-  "What’s a skill you want to learn this year?",
+  "What's a skill you want to learn this year?",
   "Tell me about a memorable day you had recently.",
-  "What kind of music do you listen to, and when do you listen to it?",
+  "What kind of music do you listen to, and when?",
   "If you could travel anywhere, where would you go and why?",
   "What do you usually do on weekends?",
-  "What is your favorite movie or series, and what do you like about it?",
-  "What’s a goal you’re working on right now?",
-  "What makes a good friend, in your opinion?"
+  "What is your favorite movie or series, and why?",
+  "What's a goal you're working on right now?",
+  "What makes a good friend, in your opinion?",
 ];
 
-/* ===================== Utilities ===================== */
-const now = () => Date.now();
+/* ──────────────────────────────────────────────────────────
+   UTILITIES
+────────────────────────────────────────────────────────── */
+const ts  = () => Date.now();
+const uid = (n = 16) => crypto.randomBytes(n).toString("hex");
+const hrMs= () => Number(process.hrtime.bigint() / 1_000_000n);
+
+function safeStr(x, max = 80) {
+  return String(x ?? "").trim().slice(0, max);
+}
+
+function normName(name) {
+  return safeStr(name, MAX_NAME_LEN).replace(/\s+/g, " ");
+}
 
 function clamp(n, a, b) {
   n = Number(n) || 0;
   return Math.max(a, Math.min(b, n));
 }
 
-function safeStr(x, max = 80) {
-  return String(x ?? "").trim().slice(0, max);
-}
-
-function normalizeName(name) {
-  return safeStr(name, MAX_NAME_LEN).replace(/\s+/g, " ");
-}
-
-function uid(n = 16) {
-  return crypto.randomBytes(n).toString("hex");
-}
-
-function hrTimeMs() {
-  const t = process.hrtime.bigint();
-  return Number(t / 1000000n);
-}
-
 function makeRoomId(a, b) {
-  return `room_${[String(a), String(b)].sort().join("_")}_${now()}_${uid(4)}`;
+  return `room_${[String(a), String(b)].sort().join("_")}_${ts()}_${uid(4)}`;
 }
 
-function samePrefs(a, b) {
+/* Match preferences: Any matches anything */
+function prefsMatch(a, b) {
   const gOk = a.gender === "Any" || b.gender === "Any" || a.gender === b.gender;
-  const lOk = a.level === "Any" || b.level === "Any" || a.level === b.level;
+  const lOk = a.level  === "Any" || b.level  === "Any" || a.level  === b.level;
   return gOk && lOk;
 }
 
-function userPublic(u) {
-  return {
-    name: u.name,
-    gender: u.gender,
-    level: u.level,
-    roomId: u.roomId || null
-  };
+function publicUser(u) {
+  return { name: u.name, gender: u.gender, level: u.level, roomId: u.roomId || null };
 }
 
-function textFromOpenAICompatChoice(json) {
-  const c = json?.choices?.[0];
-  const content = c?.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((p) => (typeof p === "string" ? p : p?.text || ""))
-      .filter(Boolean)
-      .join("");
-  }
-  return "";
-}
-
-/* ===================== Logger ===================== */
+/* ──────────────────────────────────────────────────────────
+   LOGGER  (structured JSON)
+────────────────────────────────────────────────────────── */
 function log(level, msg, meta) {
-  const base = { ts: new Date().toISOString(), level, msg, env: NODE_ENV };
-  console.log(JSON.stringify(meta ? { ...base, ...meta } : base));
+  console.log(JSON.stringify({ ts: new Date().toISOString(), level, msg, env: NODE_ENV, ...meta }));
 }
-const info = (m, meta) => log("info", m, meta);
-const warn = (m, meta) => log("warn", m, meta);
-const error = (m, meta) => log("error", m, meta);
+const info = (m, x) => log("info",  m, x);
+const warn = (m, x) => log("warn",  m, x);
+const err  = (m, x) => log("error", m, x);
 
-/* ===================== App / Server ===================== */
+/* ──────────────────────────────────────────────────────────
+   EXPRESS + SERVER
+────────────────────────────────────────────────────────── */
 const app = express();
 app.set("trust proxy", TRUST_PROXY);
 app.disable("x-powered-by");
@@ -179,87 +182,90 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(express.json({ limit: JSON_LIMIT }));
 
-/* ---------- Open CORS (domainlarsiz) ---------- */
+/* Open CORS */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  res.setHeader("Access-Control-Allow-Origin",  origin || "*");
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Admin-Token");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-/* ---------- HTTP Rate limit ---------- */
+/* HTTP rate limit */
 app.use(rateLimit({
-  windowMs: 10 * 1000,
+  windowMs: 10_000,
   max: IS_PROD ? 250 : 2000,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
 }));
 
-/* ---------- Static ---------- */
-app.use(express.static(STATIC_DIR, {
-  maxAge: IS_PROD ? "7d" : 0,
-  etag: true
-}));
+/* Static files */
+app.use(express.static(STATIC_DIR, { maxAge: IS_PROD ? "7d" : 0, etag: true }));
 
-/* ===================== In-memory State ===================== */
-const state = {
-  usersBySocket: new Map(), // socketId -> user
-  socketsByName: new Map(), // name -> socketId
-  bannedNames: new Set(),
+/* ──────────────────────────────────────────────────────────
+   IN-MEMORY STATE
+────────────────────────────────────────────────────────── */
+const STATE = {
+  /* socketId → user object */
+  bySocket: new Map(),
+  /* name → socketId  (one name = one active session) */
+  byName:   new Map(),
+  /* banned names */
+  banned:   new Set(),
 
-  waiting: [],              // { socketId, ts }
-  rooms: new Map(),         // roomId -> room
+  /* waiting queue: [{ socketId, ts }] */
+  waiting:  [],
 
-  reportsByName: new Map(),
-  ratingsByName: new Map(),
+  /* roomId → room object */
+  rooms:    new Map(),
+
+  /* name → report count */
+  reports:  new Map(),
+  /* name → { sum, count } */
+  ratings:  new Map(),
+
+  /* socket token buckets */
+  buckets:  new Map(),
+
   totals: { visitors: 0, messages: 0, aiReplies: 0 },
 
-  buckets: new Map(),
   metrics: {
-    aiProvider: AI_PROVIDER,
-    aiLatencyMsLast: 0,
-    aiLatencyMsMax5m: 0,
-    aiLatencyWindow: [],
-    aiErrors: 0
-  }
+    aiProvider:      AI_PROVIDER,
+    aiLatencyLast:   0,
+    aiLatencyMax5m:  0,
+    aiLatencyWindow: [],  // [{ ts, ms }]
+    aiErrors:        0,
+  },
 };
 
-/* ---------- Health ---------- */
-app.get("/healthz", (req, res) => {
-  res.json({
-    ok: true,
-    env: NODE_ENV,
-    uptime: process.uptime(),
-    online: state.usersBySocket.size
-  });
-});
+/* ──────────────────────────────────────────────────────────
+   HTTP ENDPOINTS
+────────────────────────────────────────────────────────── */
 
-/* ---------- ICE config ---------- */
-app.get("/webrtc-config", (req, res) => {
+/* Health */
+app.get("/healthz", (_, res) =>
+  res.json({ ok: true, env: NODE_ENV, uptime: process.uptime(), online: STATE.bySocket.size }));
+
+/* WebRTC ICE config */
+app.get("/webrtc-config", (_, res) => {
   const iceServers = [{ urls: STUN }];
-  if (TURN_URL && TURN_USER && TURN_PASS) {
+  if (TURN_URL && TURN_USER && TURN_PASS)
     iceServers.push({ urls: TURN_URL, username: TURN_USER, credential: TURN_PASS });
-  }
   res.json({ iceServers, forceRelay: FORCE_RELAY });
 });
 
-/* ---------- Diagnostics ---------- */
-app.get("/diag", (req, res) => {
+/* Diagnostics */
+app.get("/diag", (_, res) =>
   res.json({
-    env: NODE_ENV,
-    aiProvider: AI_PROVIDER,
-    stun: STUN,
+    env: NODE_ENV, aiProvider: AI_PROVIDER, stun: STUN,
     turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
-    forceRelay: FORCE_RELAY,
-    aiConfigured: getAiConfigured()
-  });
-});
+    forceRelay: FORCE_RELAY, aiConfigured: aiConfigured(),
+  }));
 
-/* ===================== Admin HTTP API (token) ===================== */
-function adminHttpAuth(req, res) {
+/* ── Admin HTTP API ─────────────────────────────────── */
+function adminHttpOk(req, res) {
   const tok = String(req.headers["x-admin-token"] || "").trim();
   if (!ADMIN_TOKEN || tok !== ADMIN_TOKEN) {
     res.status(401).json({ ok: false, error: "unauthorized" });
@@ -269,753 +275,631 @@ function adminHttpAuth(req, res) {
 }
 
 app.get("/admin/stats", (req, res) => {
-  if (!adminHttpAuth(req, res)) return;
+  if (!adminHttpOk(req, res)) return;
   res.json({
     ok: true,
-    online: state.usersBySocket.size,
-    waiting: state.waiting.length,
-    rooms: state.rooms.size,
-    totals: { ...state.totals },
+    online:  STATE.bySocket.size,
+    waiting: STATE.waiting.length,
+    rooms:   STATE.rooms.size,
+    totals:  { ...STATE.totals },
     metrics: {
-      aiProvider: state.metrics.aiProvider,
-      aiLatencyMsLast: state.metrics.aiLatencyMsLast,
-      aiLatencyMsMax5m: state.metrics.aiLatencyMsMax5m,
-      aiErrors: state.metrics.aiErrors
-    }
+      aiProvider:    STATE.metrics.aiProvider,
+      aiLatencyLast: STATE.metrics.aiLatencyLast,
+      aiErrors:      STATE.metrics.aiErrors,
+    },
   });
 });
 
-/* ===================== Create server + Socket.IO ===================== */
+/* ──────────────────────────────────────────────────────────
+   SOCKET.IO
+────────────────────────────────────────────────────────── */
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: true, methods: ["GET", "POST"] }, // open
-  transports: ["websocket", "polling"],
-  pingTimeout: 20000,
-  pingInterval: 25000,
-  maxHttpBufferSize: 1e6
+  cors:               { origin: true, methods: ["GET", "POST"] },
+  transports:         ["websocket", "polling"],
+  pingTimeout:        20_000,
+  pingInterval:       25_000,
+  maxHttpBufferSize:  1_000_000,
 });
 
-/* ===================== Helpers: stats ===================== */
-function getOnlineCount() { return state.usersBySocket.size; }
-function getRoomsCount() { return state.rooms.size; }
-function getWaitingCount() { return state.waiting.length; }
-
-function getReports() {
+/* ──────────────────────────────────────────────────────────
+   STAT / SNAPSHOT HELPERS
+────────────────────────────────────────────────────────── */
+function onlineUsers() {
   const out = [];
-  for (const [name, count] of state.reportsByName.entries()) out.push({ name, count });
-  out.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  for (const [, u] of STATE.bySocket) out.push(publicUser(u));
   return out;
 }
 
-function getRatingsLeaderboard(limit = 50) {
-  const rows = [];
-  for (const [name, r] of state.ratingsByName.entries()) {
-    const avg = r.count ? (r.sum / r.count) : 0;
-    rows.push({ name, avg: Number(avg.toFixed(2)), count: r.count });
-  }
-  rows.sort((a, b) => b.avg - a.avg || b.count - a.count || a.name.localeCompare(b.name));
-  return rows.slice(0, limit);
+function getReports() {
+  return [...STATE.reports.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+function getLeaderboard(limit = 50) {
+  return [...STATE.ratings.entries()]
+    .map(([name, r]) => ({ name, avg: r.count ? +(r.sum / r.count).toFixed(2) : 0, count: r.count }))
+    .sort((a, b) => b.avg - a.avg || b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, limit);
 }
 
 function emitGlobalStats() {
   io.emit("global:stats", {
-    online: getOnlineCount(),
-    waiting: getWaitingCount(),
-    rooms: getRoomsCount(),
-    totals: { ...state.totals }
+    online:  STATE.bySocket.size,
+    waiting: STATE.waiting.length,
+    rooms:   STATE.rooms.size,
+    totals:  { ...STATE.totals },
   });
 }
 
-function emitAdminSnapshot(toSocketId = null) {
+function emitAdminSnapshot(toId = null) {
   const payload = {
-    online: getOnlineCount(),
-    waiting: getWaitingCount(),
-    rooms: getRoomsCount(),
-    totals: { ...state.totals },
-    reports: getReports(),
-    banned: Array.from(state.bannedNames).sort((a, b) => a.localeCompare(b)),
-    leaderboard: getRatingsLeaderboard(50),
-    metrics: {
-      aiProvider: state.metrics.aiProvider,
-      aiLatencyMsLast: state.metrics.aiLatencyMsLast,
-      aiLatencyMsMax5m: state.metrics.aiLatencyMsMax5m,
-      aiErrors: state.metrics.aiErrors
-    }
+    online:      STATE.bySocket.size,
+    waiting:     STATE.waiting.length,
+    rooms:       STATE.rooms.size,
+    totals:      { ...STATE.totals },
+    reports:     getReports(),
+    banned:      [...STATE.banned].sort(),
+    leaderboard: getLeaderboard(50),
+    onlineUsers: onlineUsers(),        // ← client renders online list from this
+    metrics:     {
+      aiProvider:    STATE.metrics.aiProvider,
+      aiLatencyLast: STATE.metrics.aiLatencyLast,
+      aiErrors:      STATE.metrics.aiErrors,
+    },
   };
-  if (toSocketId) io.to(toSocketId).emit("admin:snapshot", payload);
-  else io.emit("admin:snapshot", payload);
+  if (toId) io.to(toId).emit("admin:snapshot", payload);
+  else       io.emit("admin:snapshot", payload);
 }
 
-/* ===================== Waiting / Room Helpers ===================== */
-function removeFromWaiting(socketId) {
-  if (!state.waiting.length) return;
-  state.waiting = state.waiting.filter((w) => w.socketId !== socketId);
+/* ──────────────────────────────────────────────────────────
+   ROOM / WAITING HELPERS
+────────────────────────────────────────────────────────── */
+function removeWaiting(socketId) {
+  STATE.waiting = STATE.waiting.filter(w => w.socketId !== socketId);
 }
 
-function roomOther(room, socketId) {
-  return room.a === socketId ? room.b : room.a;
-}
-
-function safeLeaveRoomSocket(socketId, roomId) {
-  try { io.sockets.sockets.get(socketId)?.leave(roomId); } catch {}
+function touchRoom(roomId) {
+  const r = STATE.rooms.get(roomId);
+  if (r) r.lastActivityAt = ts();
 }
 
 function endRoom(roomId, reason) {
-  const room = state.rooms.get(roomId);
+  const room = STATE.rooms.get(roomId);
   if (!room) return;
 
-  const ids = [room.a, room.b].filter(Boolean);
-  for (const id of ids) {
-    const u = state.usersBySocket.get(id);
+  [room.a, room.b].filter(Boolean).forEach(sid => {
+    const u = STATE.bySocket.get(sid);
     if (u) u.roomId = null;
+    io.to(sid).emit("room:ended", { reason: reason || "ended" });
+    try { io.sockets.sockets.get(sid)?.leave(roomId); } catch (_) {}
+  });
 
-    io.to(id).emit("room:ended", { reason: reason || "ended" });
-    safeLeaveRoomSocket(id, roomId);
-  }
-
-  state.rooms.delete(roomId);
+  STATE.rooms.delete(roomId);
   emitGlobalStats();
   emitAdminSnapshot();
 }
 
 function leaveRoom(socketId, reason) {
-  const u = state.usersBySocket.get(socketId);
-  if (!u?.roomId) return;
-  endRoom(u.roomId, reason || "left");
+  const u = STATE.bySocket.get(socketId);
+  if (u?.roomId) endRoom(u.roomId, reason || "left");
 }
 
-/* ===================== Abuse guards ===================== */
-function bucketTake(socketId, kind = "event", bytes = 0) {
-  const t = now();
-  const b = state.buckets.get(socketId) || { ts: t, eventCount: 0, msgCount: 0, byteCount: 0 };
+function otherInRoom(room, socketId) {
+  return room.a === socketId ? room.b : room.a;
+}
 
-  if (t - b.ts > 10_000) {
-    b.ts = t;
-    b.eventCount = 0;
-    b.msgCount = 0;
-    b.byteCount = 0;
-  }
+/* ──────────────────────────────────────────────────────────
+   TOKEN BUCKET  (per-socket rate limiting)
+────────────────────────────────────────────────────────── */
+function bucketOk(socketId, kind = "event", bytes = 0) {
+  const now = ts();
+  let b = STATE.buckets.get(socketId) || { ts: now, ev: 0, msg: 0, by: 0 };
 
-  b.byteCount += Math.max(0, Number(bytes) || 0);
-  if (b.byteCount > SOCKET_BYTES_PER_10S) { state.buckets.set(socketId, b); return false; }
+  if (now - b.ts > 10_000) { b = { ts: now, ev: 0, msg: 0, by: 0 }; }
+
+  b.by += Math.max(0, Number(bytes) || 0);
+  if (b.by > SOCK_BY_PER_10S) { STATE.buckets.set(socketId, b); return false; }
 
   if (kind === "msg") {
-    b.msgCount += 1;
-    if (b.msgCount > SOCKET_MSGS_PER_10S) { state.buckets.set(socketId, b); return false; }
+    b.msg++;
+    if (b.msg > SOCK_MSG_PER_10S) { STATE.buckets.set(socketId, b); return false; }
   } else {
-    b.eventCount += 1;
-    if (b.eventCount > SOCKET_EVENTS_PER_10S) { state.buckets.set(socketId, b); return false; }
+    b.ev++;
+    if (b.ev > SOCK_EV_PER_10S) { STATE.buckets.set(socketId, b); return false; }
   }
 
-  state.buckets.set(socketId, b);
+  STATE.buckets.set(socketId, b);
   return true;
 }
 
-/* ===================== Reports/Ratings/Bans ===================== */
+/* ──────────────────────────────────────────────────────────
+   REPORTS / RATINGS / BANS
+────────────────────────────────────────────────────────── */
 function addReport(name) {
-  const n = normalizeName(name);
-  if (!n) return;
-  state.reportsByName.set(n, (state.reportsByName.get(n) || 0) + 1);
+  const n = normName(name); if (!n) return;
+  STATE.reports.set(n, (STATE.reports.get(n) || 0) + 1);
 }
 
 function addRating(name, stars) {
-  const n = normalizeName(name);
-  if (!n) return;
-  const s = Math.max(1, Math.min(5, Number(stars) || 0));
-  if (!state.ratingsByName.has(n)) state.ratingsByName.set(n, { sum: 0, count: 0 });
-  const r = state.ratingsByName.get(n);
-  r.sum += s;
-  r.count += 1;
+  const n = normName(name); if (!n) return;
+  const s = clamp(Number(stars), 1, 5);
+  if (!STATE.ratings.has(n)) STATE.ratings.set(n, { sum: 0, count: 0 });
+  const r = STATE.ratings.get(n);
+  r.sum += s; r.count++;
 }
 
-function banName(name) {
-  const n = normalizeName(name);
-  if (!n) return;
+function banUser(name) {
+  const n = normName(name); if (!n) return;
+  STATE.banned.add(n);
 
-  state.bannedNames.add(n);
-
-  const sockId = state.socketsByName.get(n);
-  if (sockId) {
-    const u = state.usersBySocket.get(sockId);
-    if (u?.roomId) leaveRoom(sockId, "banned");
-    removeFromWaiting(sockId);
-
-    io.to(sockId).emit("user:banned");
-    try { io.sockets.sockets.get(sockId)?.disconnect(true); } catch {}
+  const sid = STATE.byName.get(n);
+  if (sid) {
+    const u = STATE.bySocket.get(sid);
+    if (u?.roomId) leaveRoom(sid, "banned");
+    removeWaiting(sid);
+    io.to(sid).emit("user:banned");
+    try { io.sockets.sockets.get(sid)?.disconnect(true); } catch (_) {}
   }
 
   emitAdminSnapshot();
   emitGlobalStats();
 }
 
-function unbanName(name) {
-  const n = normalizeName(name);
-  if (!n) return;
-  state.bannedNames.delete(n);
+function unbanUser(name) {
+  STATE.banned.delete(normName(name));
   emitAdminSnapshot();
 }
 
-/* ===================== HTTP client (fetchsiz) ===================== */
-function httpRequestWithTimeout(urlStr, opts = {}, timeoutMs = AI_TIMEOUT_MS) {
-  return new Promise((resolve, reject) => {
-    let timedOut = false;
-    const u = new URL(urlStr);
-    const lib = u.protocol === "https:" ? https : http;
-
-    const method = (opts.method || "GET").toUpperCase();
-    const headers = Object.assign({}, opts.headers || {});
-    const body = opts.body != null ? String(opts.body) : null;
-
-    if (body != null && !headers["content-length"] && !headers["Content-Length"]) {
-      headers["content-length"] = Buffer.byteLength(body);
-    }
-
-    const req = lib.request({
-      protocol: u.protocol,
-      hostname: u.hostname,
-      port: u.port || (u.protocol === "https:" ? 443 : 80),
-      path: u.pathname + (u.search || ""),
-      method,
-      headers
-    }, (res) => {
-      const chunks = [];
-      res.on("data", (d) => chunks.push(d));
-      res.on("end", () => {
-        if (timedOut) return;
-        const text = Buffer.concat(chunks).toString("utf8");
-        let json = null;
-        try { json = text ? JSON.parse(text) : null; } catch {}
-        resolve({
-          ok: res.statusCode >= 200 && res.statusCode < 300,
-          status: res.statusCode || 0,
-          text,
-          json
-        });
-      });
-    });
-
-    req.on("error", (err) => {
-      if (timedOut) return;
-      reject(err);
-    });
-
-    req.setTimeout(timeoutMs, () => {
-      timedOut = true;
-      try { req.destroy(new Error("timeout")); } catch {}
-      reject(new Error("timeout"));
-    });
-
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
-
-/* ===================== AI Provider Layer ===================== */
-function getAiConfigured() {
-  if (AI_PROVIDER === "groq") return !!GROQ_API_KEY && !String(GROQ_API_KEY).includes("PASTE_YOUR");
-  if (AI_PROVIDER === "xai") return !!XAI_API_KEY && !String(XAI_API_KEY).includes("PASTE_YOUR");
-  if (AI_PROVIDER === "gemini") return !!GEMINI_API_KEY && !String(GEMINI_API_KEY).includes("PASTE_YOUR");
+/* ──────────────────────────────────────────────────────────
+   AI PROVIDER LAYER
+────────────────────────────────────────────────────────── */
+function aiConfigured() {
+  if (AI_PROVIDER === "groq")   return !!GROQ_API_KEY;
+  if (AI_PROVIDER === "xai")    return !!XAI_API_KEY;
+  if (AI_PROVIDER === "gemini") return !!GEMINI_API_KEY;
   return false;
 }
 
-async function openAICompatChat({
-  baseURL,
-  apiKey,
-  model,
-  system,
-  user,
-  maxOutputTokens = 320,
-  temperature = 0.7,
-  timeoutMs = AI_TIMEOUT_MS
-}) {
-  if (!apiKey || String(apiKey).includes("PASTE_YOUR")) return "AI is not configured. Missing API key.";
+async function fetchWithTimeout(url, opts = {}, ms = AI_TIMEOUT_MS) {
+  const ac    = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  try {
+    const res  = await fetch(url, { ...opts, signal: ac.signal });
+    const text = await res.text().catch(() => "");
+    let json   = null;
+    try { json = text ? JSON.parse(text) : null; } catch (_) {}
+    return { ok: res.ok, status: res.status, text, json };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-  const url = `${String(baseURL).replace(/\/+$/, "")}/chat/completions`;
+function extractOpenAIText(json) {
+  const content = json?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content))
+    return content.map(p => (typeof p === "string" ? p : p?.text || "")).filter(Boolean).join("");
+  return "";
+}
+
+async function callOpenAICompat({ baseURL, apiKey, model, system, user, maxTokens = 320, temperature = 0.7 }) {
+  if (!apiKey) return "AI is not configured. Missing API key.";
+  const url  = `${baseURL.replace(/\/+$/, "")}/chat/completions`;
   const body = {
     model,
     messages: [
       { role: "system", content: String(system || "") },
-      { role: "user", content: String(user || "") }
+      { role: "user",   content: String(user   || "") },
     ],
     temperature,
-    max_tokens: maxOutputTokens
+    max_tokens: maxTokens,
   };
-
   try {
-    const { ok, status, text, json } = await httpRequestWithTimeout(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(body)
-    }, timeoutMs);
-
-    if (!ok) return `AI error: ${status} ${(text || "").slice(0, 500)}`;
-
-    const msg = textFromOpenAICompatChoice(json);
-    return String(msg || "AI: (no response)").trim().slice(0, 2500);
+    const { ok, status, text, json } = await fetchWithTimeout(url, {
+      method:  "POST",
+      headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
+      body:    JSON.stringify(body),
+    });
+    if (!ok) return `AI error: ${status} ${(text || "").slice(0, 400)}`;
+    return String(extractOpenAIText(json) || "AI: (no response)").trim().slice(0, 2500);
   } catch (e) {
     return `AI error: ${String(e?.message || "timeout or network issue")}`;
   }
 }
 
-async function groqText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = AI_TIMEOUT_MS }) {
-  return openAICompatChat({
-    baseURL: GROQ_BASE_URL,
-    apiKey: GROQ_API_KEY,
-    model: GROQ_MODEL,
-    system,
-    user,
-    maxOutputTokens,
-    temperature,
-    timeoutMs
-  });
-}
-
-async function xaiText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = AI_TIMEOUT_MS }) {
-  return openAICompatChat({
-    baseURL: XAI_BASE_URL,
-    apiKey: XAI_API_KEY,
-    model: XAI_MODEL,
-    system,
-    user,
-    maxOutputTokens,
-    temperature,
-    timeoutMs
-  });
-}
-
-async function geminiText({ system, user, maxOutputTokens = 320, temperature = 0.7, timeoutMs = AI_TIMEOUT_MS }) {
-  if (!GEMINI_API_KEY || String(GEMINI_API_KEY).includes("PASTE_YOUR")) return "AI is not configured. Missing GEMINI_API_KEY.";
-
-  const url = `${GEMINI_BASE}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+async function callGemini({ system, user, maxTokens = 320, temperature = 0.7 }) {
+  if (!GEMINI_API_KEY) return "AI is not configured. Missing GEMINI_API_KEY.";
+  const url  = `${GEMINI_BASE}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
   const body = {
     contents: [{ role: "user", parts: [{ text: `${system}\n\nUSER:\n${user}` }] }],
-    generationConfig: { temperature, maxOutputTokens }
+    generationConfig: { temperature, maxOutputTokens: maxTokens },
   };
-
   try {
-    const { ok, status, text, json } = await httpRequestWithTimeout(url, {
-      method: "POST",
+    const { ok, status, text, json } = await fetchWithTimeout(url, {
+      method:  "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    }, timeoutMs);
-
-    if (!ok) return `AI error: ${status} ${(text || "").slice(0, 500)}`;
-
-    const out =
-      json?.candidates?.[0]?.content?.parts?.map((p) => p?.text || "").filter(Boolean).join("") ||
-      "AI: (no response)";
-
+      body:    JSON.stringify(body),
+    });
+    if (!ok) return `AI error: ${status} ${(text || "").slice(0, 400)}`;
+    const out = json?.candidates?.[0]?.content?.parts?.map(p => p?.text || "").filter(Boolean).join("") || "AI: (no response)";
     return String(out).trim().slice(0, 2500);
   } catch (e) {
     return `AI error: ${String(e?.message || "timeout or network issue")}`;
   }
 }
 
-async function aiText(opts) {
-  if (AI_PROVIDER === "groq") return groqText(opts);
-  if (AI_PROVIDER === "xai") return xaiText(opts);
-  if (AI_PROVIDER === "gemini") return geminiText(opts);
-  return `AI error: unsupported AI_PROVIDER "${AI_PROVIDER}"`;
+async function aiText({ system, user, maxTokens = 320, temperature = 0.7 }) {
+  if (AI_PROVIDER === "xai")
+    return callOpenAICompat({ baseURL: XAI_BASE_URL, apiKey: XAI_API_KEY, model: XAI_MODEL, system, user, maxTokens, temperature });
+  if (AI_PROVIDER === "gemini")
+    return callGemini({ system, user, maxTokens, temperature });
+  /* default: groq */
+  return callOpenAICompat({ baseURL: GROQ_BASE_URL, apiKey: GROQ_API_KEY, model: GROQ_MODEL, system, user, maxTokens, temperature });
 }
 
-async function aiJSON({ system, user, maxOutputTokens = 420, temperature = 0.35, timeoutMs = AI_TIMEOUT_MS }) {
-  const raw = await aiText({ system, user, maxOutputTokens, temperature, timeoutMs });
-  const t = String(raw || "").trim();
-
-  try { return JSON.parse(t); } catch {}
-
-  const first = t.indexOf("{");
-  const last = t.lastIndexOf("}");
-  if (first >= 0 && last > first) {
-    const slice = t.slice(first, last + 1);
-    try { return JSON.parse(slice); } catch {}
+async function aiJSON(opts) {
+  const raw = await aiText(opts);
+  const t   = String(raw || "").trim();
+  try { return JSON.parse(t); } catch (_) {}
+  const fi = t.indexOf("{"); const li = t.lastIndexOf("}");
+  if (fi >= 0 && li > fi) {
+    try { return JSON.parse(t.slice(fi, li + 1)); } catch (_) {}
   }
   return { error: "bad_json", raw: t.slice(0, 900) };
 }
 
-/* ===================== Maintenance Cleanups ===================== */
-function cleanupWaiting() {
-  const t = now();
-  if (!state.waiting.length) return;
+/* ──────────────────────────────────────────────────────────
+   AI PROMPTS
+────────────────────────────────────────────────────────── */
+const COACH_SYSTEM = `\
+You are an IELTS speaking coach in a voice practice app.
+Every turn output EXACTLY this structure (no extra text):
 
-  state.waiting = state.waiting.filter((w) => (t - w.ts) <= WAITING_TTL_MS);
-  if (state.waiting.length > WAITING_LIMIT) state.waiting = state.waiting.slice(0, WAITING_LIMIT);
+Reply: <1-2 short sentences responding to the user>
+Fixes:
+- <Wrong phrase → Corrected phrase>
+- <Wrong phrase → Corrected phrase>
+Tip: <one short practical advice>
+Next question: <one follow-up question to keep the conversation going>
+
+English only. Keep it friendly and concise.`;
+
+const REPORT_SYSTEM = `\
+You are a strict IELTS speaking examiner.
+Return ONLY valid JSON with this exact schema (no markdown, no extra keys):
+{
+  "band": 0-9,
+  "fluency": 0-9,
+  "grammar": 0-9,
+  "vocab": 0-9,
+  "pronunciation": 0-9,
+  "summary": "1-2 sentences",
+  "fixes": ["Wrong → Correct", "Wrong → Correct", "Wrong → Correct"],
+  "next_steps": ["...", "...", "..."]
 }
+English only. Be strict and accurate.`;
 
-function cleanupRooms() {
-  const t = now();
-  for (const [roomId, room] of state.rooms.entries()) {
-    const createdAt = Number(room?.createdAt) || 0;
-    const lastActivityAt = Number(room?.lastActivityAt) || createdAt;
-
-    if (createdAt && (t - createdAt) > ROOM_TTL_MS) { endRoom(roomId, "timeout"); continue; }
-    if (lastActivityAt && (t - lastActivityAt) > ROOM_IDLE_END_MS) endRoom(roomId, "idle_timeout");
-  }
-}
-
+/* ──────────────────────────────────────────────────────────
+   MAINTENANCE CLEANUP  (runs every 20 s)
+────────────────────────────────────────────────────────── */
 setInterval(() => {
-  cleanupWaiting();
-  cleanupRooms();
+  const now = ts();
 
-  const win = state.metrics.aiLatencyWindow;
-  const cutoff = now() - 5 * 60 * 1000;
+  /* Clean expired waiting slots */
+  STATE.waiting = STATE.waiting.filter(w => now - w.ts <= WAITING_TTL_MS);
+  if (STATE.waiting.length > WAITING_LIMIT) STATE.waiting = STATE.waiting.slice(0, WAITING_LIMIT);
+
+  /* Clean expired / idle rooms */
+  for (const [roomId, room] of STATE.rooms) {
+    const created = room.createdAt || 0;
+    const active  = room.lastActivityAt || created;
+    if (created && now - created > ROOM_TTL_MS)  { endRoom(roomId, "timeout");      continue; }
+    if (active  && now - active  > ROOM_IDLE_MS) { endRoom(roomId, "idle_timeout"); continue; }
+  }
+
+  /* Trim AI latency window (keep last 5 min) */
+  const win    = STATE.metrics.aiLatencyWindow;
+  const cutoff = now - 5 * 60 * 1000;
   while (win.length && win[0].ts < cutoff) win.shift();
-  state.metrics.aiLatencyMsMax5m = win.reduce((m, x) => Math.max(m, x.ms), 0);
+  STATE.metrics.aiLatencyMax5m = win.reduce((m, x) => Math.max(m, x.ms), 0);
+
 }, 20_000).unref();
 
-/* ===================== Socket.IO ===================== */
-io.on("connection", (socket) => {
-  state.totals.visitors++;
+/* ──────────────────────────────────────────────────────────
+   SOCKET.IO — CONNECTION
+────────────────────────────────────────────────────────── */
+io.on("connection", socket => {
+  STATE.totals.visitors++;
 
+  /* Send questions immediately */
   socket.emit("global:questions", { questions: QUESTIONS });
   emitGlobalStats();
   emitAdminSnapshot();
 
-  function mustBeRegistered() {
-    return state.usersBySocket.get(socket.id) || null;
-  }
+  /* Helper: get user or null */
+  const me = () => STATE.bySocket.get(socket.id) || null;
 
-  function touchRoomActivity(roomId) {
-    const r = state.rooms.get(roomId);
-    if (r) r.lastActivityAt = now();
-  }
-
-  /* ---------- Register ---------- */
+  /* ── user:register ────────────────────────────────── */
   socket.on("user:register", ({ name } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ name: name ?? "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const n = normalizeName(name);
+    const n = normName(name);
     if (!n) return socket.emit("user:register:fail", { reason: "bad_name" });
-    if (state.bannedNames.has(n)) return socket.emit("user:register:fail", { reason: "banned" });
+    if (STATE.banned.has(n)) return socket.emit("user:register:fail", { reason: "banned" });
 
-    // Kick same-name old session
-    const oldId = state.socketsByName.get(n);
-    if (oldId && oldId !== socket.id) {
-      const oldSock = io.sockets.sockets.get(oldId);
+    /* Enforce one-session-per-name: kick old session */
+    const oldSid = STATE.byName.get(n);
+    if (oldSid && oldSid !== socket.id) {
+      /* The old session gets kicked — new session takes the name */
+      const oldSock = io.sockets.sockets.get(oldSid);
       if (oldSock) {
-        try { oldSock.emit("user:kicked"); } catch {}
-        try { oldSock.disconnect(true); } catch {}
+        try { oldSock.emit("user:kicked"); } catch (_) {}
+        try { oldSock.disconnect(true);   } catch (_) {}
       }
+      /* Clean up old user from state */
+      const oldUser = STATE.bySocket.get(oldSid);
+      if (oldUser) {
+        if (oldUser.roomId) endRoom(oldUser.roomId, "rename");
+        removeWaiting(oldSid);
+        STATE.bySocket.delete(oldSid);
+        STATE.buckets.delete(oldSid);
+      }
+      STATE.byName.delete(n);
     }
 
-    // Rename flow
-    const existing = state.usersBySocket.get(socket.id);
+    /* Rename: same socket already registered */
+    const existing = STATE.bySocket.get(socket.id);
     if (existing) {
-      if (existing.roomId) endRoom(existing.roomId, "rename");
-      removeFromWaiting(socket.id);
-
-      if (state.socketsByName.get(existing.name) === socket.id) {
-        state.socketsByName.delete(existing.name);
+      if (existing.name !== n) {
+        if (existing.roomId) endRoom(existing.roomId, "rename");
+        removeWaiting(socket.id);
+        if (STATE.byName.get(existing.name) === socket.id) STATE.byName.delete(existing.name);
       }
-
-      state.socketsByName.set(n, socket.id);
-      existing.name = n;
-      existing.roomId = null;
+      existing.name    = n;
+      existing.roomId  = null;
       existing.searching = false;
-
-      socket.emit("user:register:ok", { user: userPublic(existing), aiScore: existing.aiScore });
+      STATE.byName.set(n, socket.id);
+      socket.emit("user:register:ok", { user: publicUser(existing), aiScore: existing.aiScore });
       emitGlobalStats();
       emitAdminSnapshot();
       return;
     }
 
-    state.socketsByName.set(n, socket.id);
-
+    /* Fresh registration */
     const user = {
-      socketId: socket.id,
-      name: n,
-      gender: "Any",
-      level: "Any",
-      roomId: null,
-      searching: false,
-      createdAt: now(),
-      aiScore: null
+      socketId:   socket.id,
+      name:       n,
+      gender:     "Any",
+      level:      "Any",
+      roomId:     null,
+      searching:  false,
+      createdAt:  ts(),
+      aiScore:    null,
     };
+    STATE.bySocket.set(socket.id, user);
+    STATE.byName.set(n, socket.id);
 
-    state.usersBySocket.set(socket.id, user);
-    socket.emit("user:register:ok", { user: userPublic(user), aiScore: user.aiScore });
+    socket.emit("user:register:ok", { user: publicUser(user), aiScore: null });
     emitGlobalStats();
     emitAdminSnapshot();
   });
 
-  /* ---------- Match start ---------- */
+  /* ── match:start ──────────────────────────────────── */
   socket.on("match:start", ({ gender, level } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ gender: gender ?? "", level: level ?? "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u) return;
-    if (state.bannedNames.has(u.name)) return socket.emit("user:banned");
+    const u = me(); if (!u) return;
+    if (STATE.banned.has(u.name)) return socket.emit("user:banned");
 
+    /* Leave current room if in one */
     if (u.roomId) leaveRoom(socket.id, "restart_search");
-    removeFromWaiting(socket.id);
+    removeWaiting(socket.id);
 
-    u.gender = safeStr(gender, 12) || "Any";
-    u.level = safeStr(level, 16) || "Any";
+    u.gender    = safeStr(gender, 12) || "Any";
+    u.level     = safeStr(level,  16) || "Any";
     u.searching = true;
 
-    // AI match if user selects AI
+    /* ── AI match ─────────────────────────────────── */
     if (u.gender === "AI") {
       const roomId = makeRoomId(socket.id, "AI");
-      state.rooms.set(roomId, {
-        id: roomId,
-        a: socket.id,
-        b: null,
-        createdAt: now(),
-        lastActivityAt: now(),
-        qIndex: 0,
-        ai: true,
-        topic: null,
-        history: []
+      STATE.rooms.set(roomId, {
+        id: roomId, a: socket.id, b: null,
+        ai: true, topic: null,
+        createdAt: ts(), lastActivityAt: ts(),
+        qIndex: 0, history: [],
       });
-
-      u.roomId = roomId;
+      u.roomId    = roomId;
       u.searching = false;
-
       socket.join(roomId);
-      socket.emit("match:found", { roomId, partnerName: "AI", aiScore: u.aiScore });
-      socket.emit("icebreaker:set", { roomId, index: 0 });
-
+      socket.emit("match:found",     { roomId, partnerName: "AI", aiScore: u.aiScore });
+      socket.emit("icebreaker:set",  { roomId, index: 0 });
       emitGlobalStats();
       emitAdminSnapshot();
       return;
     }
 
-    // Human match
-    cleanupWaiting();
+    /* ── Human match ──────────────────────────────── */
+    /* Clean up stale waiting entries first */
+    STATE.waiting = STATE.waiting.filter(w => {
+      if (ts() - w.ts > WAITING_TTL_MS) return false;
+      const other = STATE.bySocket.get(w.socketId);
+      return other && !other.roomId;
+    });
 
-    let foundIndex = -1;
-    for (let i = 0; i < state.waiting.length; i++) {
-      const w = state.waiting[i];
-      const other = state.usersBySocket.get(w.socketId);
-      if (!other) continue;
-      if (other.roomId) continue;
-      if (other.socketId === socket.id) continue;
-      if (samePrefs(u, other)) { foundIndex = i; break; }
+    /* Find compatible partner */
+    let foundIdx = -1;
+    for (let i = 0; i < STATE.waiting.length; i++) {
+      const w     = STATE.waiting[i];
+      const other = STATE.bySocket.get(w.socketId);
+      if (!other || other.roomId || w.socketId === socket.id) continue;
+      if (prefsMatch(u, other)) { foundIdx = i; break; }
     }
 
-    if (foundIndex >= 0) {
-      const w = state.waiting[foundIndex];
-      state.waiting.splice(foundIndex, 1);
-
-      const other = state.usersBySocket.get(w.socketId);
+    if (foundIdx >= 0) {
+      const w     = STATE.waiting.splice(foundIdx, 1)[0];
+      const other = STATE.bySocket.get(w.socketId);
       if (!other) return;
 
       const roomId = makeRoomId(socket.id, other.socketId);
-      state.rooms.set(roomId, {
-        id: roomId,
-        a: socket.id,
-        b: other.socketId,
-        createdAt: now(),
-        lastActivityAt: now(),
-        qIndex: 0,
-        ai: false,
-        history: []
+      STATE.rooms.set(roomId, {
+        id: roomId, a: socket.id, b: other.socketId,
+        ai: false, createdAt: ts(), lastActivityAt: ts(),
+        qIndex: 0, history: [],
       });
 
-      u.roomId = roomId;
-      other.roomId = roomId;
-      u.searching = false;
-      other.searching = false;
+      u.roomId     = roomId; u.searching     = false;
+      other.roomId = roomId; other.searching = false;
 
       socket.join(roomId);
       io.sockets.sockets.get(other.socketId)?.join(roomId);
 
-      io.to(socket.id).emit("match:found", { roomId, partnerName: other.name, aiScore: u.aiScore });
-      io.to(other.socketId).emit("match:found", { roomId, partnerName: u.name, aiScore: other.aiScore });
-      io.to(roomId).emit("icebreaker:set", { roomId, index: 0 });
-
-      emitGlobalStats();
-      emitAdminSnapshot();
+      io.to(socket.id).emit("match:found",    { roomId, partnerName: other.name, aiScore: u.aiScore });
+      io.to(other.socketId).emit("match:found",{ roomId, partnerName: u.name,    aiScore: other.aiScore });
+      io.to(roomId).emit("icebreaker:set",    { roomId, index: 0 });
     } else {
-      if (state.waiting.length < WAITING_LIMIT) {
-        state.waiting.push({ socketId: socket.id, ts: now() });
-      }
+      if (STATE.waiting.length < WAITING_LIMIT)
+        STATE.waiting.push({ socketId: socket.id, ts: ts() });
       socket.emit("match:searching");
-      emitGlobalStats();
-      emitAdminSnapshot();
     }
-  });
-
-  socket.on("match:stop", () => {
-    if (!bucketTake(socket.id, "event", 1)) return;
-    const u = mustBeRegistered();
-    if (!u) return;
-
-    u.searching = false;
-    removeFromWaiting(socket.id);
 
     emitGlobalStats();
     emitAdminSnapshot();
   });
 
-  /* ---------- Icebreaker nav ---------- */
+  /* ── match:stop ───────────────────────────────────── */
+  socket.on("match:stop", () => {
+    if (!bucketOk(socket.id, "event", 1)) return;
+    const u = me(); if (!u) return;
+    u.searching = false;
+    removeWaiting(socket.id);
+    emitGlobalStats();
+    emitAdminSnapshot();
+  });
+
+  /* ── icebreaker:nav ───────────────────────────────── */
   socket.on("icebreaker:nav", ({ roomId, dir } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", dir: dir ?? "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u || !u.roomId || u.roomId !== roomId) return;
-
-    const room = state.rooms.get(roomId);
-    if (!room) return;
+    const u = me(); if (!u || u.roomId !== roomId) return;
+    const room = STATE.rooms.get(roomId); if (!room) return;
 
     let idx = Number(room.qIndex) || 0;
     if (dir === "next") idx++;
     else if (dir === "prev") idx--;
     else return;
 
-    idx = clamp(idx, 0, QUESTIONS.length - 1);
-    room.qIndex = idx;
-
-    touchRoomActivity(roomId);
-    io.to(roomId).emit("icebreaker:set", { roomId, index: idx });
+    room.qIndex = clamp(idx, 0, QUESTIONS.length - 1);
+    touchRoom(roomId);
+    io.to(roomId).emit("icebreaker:set", { roomId, index: room.qIndex });
   });
 
-  /* ---------- Chat (human + AI) ---------- */
+  /* ── chat:message ─────────────────────────────────── */
   socket.on("chat:message", async ({ roomId, text } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", text: text ?? "" }));
-    if (!bucketTake(socket.id, "msg", bytes)) return;
+    if (!bucketOk(socket.id, "msg", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u || !u.roomId || u.roomId !== roomId) return;
+    const u = me(); if (!u || u.roomId !== roomId) return;
+    const room = STATE.rooms.get(roomId); if (!room) return;
 
-    const room = state.rooms.get(roomId);
-    if (!room) return;
+    const msgText = String(text ?? "").slice(0, MAX_MSG_LEN).trim();
+    if (!msgText) return;
 
-    const msgText = String(text ?? "").slice(0, MAX_MSG_LEN);
-    if (!msgText.trim()) return;
+    STATE.totals.messages++;
+    touchRoom(roomId);
 
-    state.totals.messages++;
-    touchRoomActivity(roomId);
-
-    const msg = { from: u.name, text: msgText, ts: now() };
+    const msg = { from: u.name, text: msgText, ts: ts() };
     room.history.push(msg);
-    if (room.history.length > ROOM_HISTORY_LIMIT) room.history.shift();
+    if (room.history.length > ROOM_HISTORY) room.history.shift();
 
-    // AI room
+    /* ── AI room ────────────────────────────────── */
     if (room.ai) {
       socket.emit("chat:message", msg);
+      if (!room.topic && msgText.length >= 3) room.topic = msgText;
 
-      if (!room.topic && msgText.trim().length >= 3) room.topic = msgText.trim();
-
-      const sys =
-        "You are an IELTS speaking coach in a voice practice app.\n" +
-        "Every turn you MUST output exactly this structure:\n" +
-        "Reply: <1-2 short sentences>\n" +
-        "Fixes:\n" +
-        "- <Wrong -> Correct>\n" +
-        "- <Wrong -> Correct>\n" +
-        "Tip: <one short advice>\n" +
-        "Next question: <one follow-up question>\n" +
-        "English only. Keep it short, friendly.";
-
-      const t0 = hrTimeMs();
+      const t0      = hrMs();
       const aiReply = await aiText({
-        system: sys,
-        user: `Topic: ${room.topic || "general"}\nUser said: ${msgText}`,
-        maxOutputTokens: 340,
+        system:      COACH_SYSTEM,
+        user:        `Topic: ${room.topic || "general"}\nUser said: ${msgText}`,
+        maxTokens:   340,
         temperature: 0.65,
-        timeoutMs: AI_TIMEOUT_MS
       });
-      const dt = hrTimeMs() - t0;
+      const dt = hrMs() - t0;
 
-      if (String(aiReply).startsWith("AI error:")) state.metrics.aiErrors++;
-      state.totals.aiReplies++;
-      state.metrics.aiLatencyMsLast = dt;
-      state.metrics.aiLatencyWindow.push({ ts: now(), ms: dt });
+      if (String(aiReply).startsWith("AI error:")) STATE.metrics.aiErrors++;
+      STATE.totals.aiReplies++;
+      STATE.metrics.aiLatencyLast = dt;
+      STATE.metrics.aiLatencyWindow.push({ ts: ts(), ms: dt });
 
-      const aiMsg = { from: "AI", text: String(aiReply).slice(0, 2500), ts: now() };
+      const aiMsg = { from: "AI", text: String(aiReply).slice(0, 2500), ts: ts() };
       room.history.push(aiMsg);
-      if (room.history.length > ROOM_HISTORY_LIMIT) room.history.shift();
+      if (room.history.length > ROOM_HISTORY) room.history.shift();
 
       setTimeout(() => socket.emit("chat:message", aiMsg), 120);
-
       emitGlobalStats();
       emitAdminSnapshot();
       return;
     }
 
-    // Human room
+    /* ── Human room ─────────────────────────────── */
     io.to(roomId).emit("chat:message", msg);
     emitGlobalStats();
     emitAdminSnapshot();
   });
 
-  /* ---------- Leave room (AI report on exit) ---------- */
+  /* ── room:leave  (+ generate AI report) ──────────── */
   socket.on("room:leave", async () => {
-    if (!bucketTake(socket.id, "event", 2)) return;
+    if (!bucketOk(socket.id, "event", 2)) return;
 
-    const u = mustBeRegistered();
-    if (!u?.roomId) return;
-
+    const u = me(); if (!u?.roomId) return;
     const roomId = u.roomId;
-    const room = state.rooms.get(roomId);
+    const room   = STATE.rooms.get(roomId);
 
-    if (room && room.ai) {
-      const myName = u.name;
+    /* Generate AI report if it was an AI session */
+    if (room?.ai) {
       const myMsgs = (room.history || [])
-        .filter((m) => m.from === myName)
-        .map((m) => m.text)
+        .filter(m => m.from === u.name)
+        .map(m => m.text)
         .join("\n");
 
-      const sys =
-        "You are an IELTS speaking examiner.\n" +
-        "Return JSON only with this exact schema:\n" +
-        "{\n" +
-        '  "band": 0-9,\n' +
-        '  "fluency": 0-9,\n' +
-        '  "grammar": 0-9,\n' +
-        '  "vocab": 0-9,\n' +
-        '  "pronunciation": 0-9,\n' +
-        '  "summary": "1-2 sentences",\n' +
-        '  "fixes": ["Wrong -> Correct", "Wrong -> Correct", "Wrong -> Correct"],\n' +
-        '  "next_steps": ["...", "...", "..."]\n' +
-        "}\n" +
-        "English only. Be strict.";
-
       const rep = await aiJSON({
-        system: sys,
-        user: `User messages:\n${myMsgs || "(no messages)"}`,
-        maxOutputTokens: 520,
+        system:      REPORT_SYSTEM,
+        user:        `User messages:\n${myMsgs || "(no messages)"}`,
+        maxTokens:   520,
         temperature: 0.25,
-        timeoutMs: AI_TIMEOUT_MS
       });
 
-      const band = clamp(Number(rep.band) || 0, 0, 9);
-      u.aiScore = {
-        band,
-        fluency: clamp(Number(rep.fluency) || 0, 0, 9),
-        grammar: clamp(Number(rep.grammar) || 0, 0, 9),
-        vocab: clamp(Number(rep.vocab) || 0, 0, 9),
-        pronunciation: clamp(Number(rep.pronunciation) || 0, 0, 9)
+      const score = {
+        band:         clamp(Number(rep.band)          || 0, 0, 9),
+        fluency:      clamp(Number(rep.fluency)        || 0, 0, 9),
+        grammar:      clamp(Number(rep.grammar)        || 0, 0, 9),
+        vocab:        clamp(Number(rep.vocab)          || 0, 0, 9),
+        pronunciation:clamp(Number(rep.pronunciation)  || 0, 0, 9),
       };
+      u.aiScore = score;
 
-      io.to(socket.id).emit("coach:report", { report: rep, aiScore: u.aiScore });
+      io.to(socket.id).emit("coach:report", { report: rep, aiScore: score });
     }
 
-    removeFromWaiting(socket.id);
+    removeWaiting(socket.id);
     leaveRoom(socket.id, "left");
   });
 
-  /* ---------- Report / Rate (human only) ---------- */
+  /* ── report:partner ───────────────────────────────── */
   socket.on("report:partner", ({ roomId } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u || !u.roomId || u.roomId !== roomId) return;
+    const u = me(); if (!u || u.roomId !== roomId) return;
+    const room = STATE.rooms.get(roomId); if (!room || room.ai) return;
 
-    const room = state.rooms.get(roomId);
-    if (!room || room.ai) return;
-
-    const otherId = roomOther(room, socket.id);
-    const other = otherId ? state.usersBySocket.get(otherId) : null;
+    const otherId = otherInRoom(room, socket.id);
+    const other   = otherId ? STATE.bySocket.get(otherId) : null;
     if (!other) return;
 
     addReport(other.name);
@@ -1023,18 +907,16 @@ io.on("connection", (socket) => {
     emitAdminSnapshot();
   });
 
+  /* ── rate:partner ─────────────────────────────────── */
   socket.on("rate:partner", ({ roomId, stars } = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", stars: stars ?? "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", stars: stars ?? 0 }));
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u || !u.roomId || u.roomId !== roomId) return;
+    const u = me(); if (!u || u.roomId !== roomId) return;
+    const room = STATE.rooms.get(roomId); if (!room || room.ai) return;
 
-    const room = state.rooms.get(roomId);
-    if (!room || room.ai) return;
-
-    const otherId = roomOther(room, socket.id);
-    const other = otherId ? state.usersBySocket.get(otherId) : null;
+    const otherId = otherInRoom(room, socket.id);
+    const other   = otherId ? STATE.bySocket.get(otherId) : null;
     if (!other) return;
 
     addRating(other.name, stars);
@@ -1043,101 +925,86 @@ io.on("connection", (socket) => {
     emitAdminSnapshot();
   });
 
-  /* ---------- WebRTC signaling (human only) ---------- */
+  /* ── WebRTC signaling ─────────────────────────────── */
   socket.on("webrtc:offer", ({ roomId, sdp } = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", sdp: sdp ? "[sdp]" : "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", sdp: "[sdp]" }));
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u || u.roomId !== roomId) return;
+    const u = me(); if (!u || u.roomId !== roomId) return;
+    const room = STATE.rooms.get(roomId); if (!room || room.ai) return;
 
-    const room = state.rooms.get(roomId);
-    if (!room || room.ai) return;
-
-    const otherId = roomOther(room, socket.id);
+    const otherId = otherInRoom(room, socket.id);
     if (!otherId) return;
 
-    touchRoomActivity(roomId);
+    touchRoom(roomId);
     io.to(otherId).emit("webrtc:offer", { sdp, from: u.name });
   });
 
   socket.on("webrtc:answer", ({ roomId, sdp } = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", sdp: sdp ? "[sdp]" : "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", sdp: "[sdp]" }));
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u || u.roomId !== roomId) return;
+    const u = me(); if (!u || u.roomId !== roomId) return;
+    const room = STATE.rooms.get(roomId); if (!room || room.ai) return;
 
-    const room = state.rooms.get(roomId);
-    if (!room || room.ai) return;
-
-    const otherId = roomOther(room, socket.id);
+    const otherId = otherInRoom(room, socket.id);
     if (!otherId) return;
 
-    touchRoomActivity(roomId);
+    touchRoom(roomId);
     io.to(otherId).emit("webrtc:answer", { sdp, from: u.name });
   });
 
   socket.on("webrtc:ice", ({ roomId, candidate } = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", candidate: candidate ? "[ice]" : "" }));
-    if (!bucketTake(socket.id, "event", bytes)) return;
+    const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", candidate: "[ice]" }));
+    if (!bucketOk(socket.id, "event", bytes)) return;
 
-    const u = mustBeRegistered();
-    if (!u || u.roomId !== roomId) return;
+    const u = me(); if (!u || u.roomId !== roomId) return;
+    const room = STATE.rooms.get(roomId); if (!room || room.ai) return;
 
-    const room = state.rooms.get(roomId);
-    if (!room || room.ai) return;
-
-    const otherId = roomOther(room, socket.id);
+    const otherId = otherInRoom(room, socket.id);
     if (!otherId) return;
 
-    touchRoomActivity(roomId);
+    touchRoom(roomId);
     io.to(otherId).emit("webrtc:ice", { candidate, from: u.name });
   });
 
-  /* ---------- Admin Socket Events (token protected) ---------- */
-  function adminAuth(payload) {
+  /* ── Admin socket API ─────────────────────────────── */
+  const adminOk = (payload) => {
     const tok = String(payload?.token || "").trim();
-    return ADMIN_TOKEN && tok && tok === ADMIN_TOKEN;
-  }
+    return ADMIN_TOKEN && tok === ADMIN_TOKEN;
+  };
 
   socket.on("admin:get", (payload = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify(payload || {}));
-    if (!bucketTake(socket.id, "event", bytes)) return;
-    if (!adminAuth(payload)) return;
+    if (!bucketOk(socket.id, "event", 4)) return;
+    if (!adminOk(payload)) return;
     emitAdminSnapshot(socket.id);
   });
 
   socket.on("admin:ban", (payload = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify(payload || {}));
-    if (!bucketTake(socket.id, "event", bytes)) return;
-    if (!adminAuth(payload)) return;
-    banName(payload.name);
+    if (!bucketOk(socket.id, "event", 4)) return;
+    if (!adminOk(payload)) return;
+    banUser(payload.name);
   });
 
   socket.on("admin:unban", (payload = {}) => {
-    const bytes = Buffer.byteLength(JSON.stringify(payload || {}));
-    if (!bucketTake(socket.id, "event", bytes)) return;
-    if (!adminAuth(payload)) return;
-    unbanName(payload.name);
+    if (!bucketOk(socket.id, "event", 4)) return;
+    if (!adminOk(payload)) return;
+    unbanUser(payload.name);
   });
 
-  /* ---------- Disconnect ---------- */
-  socket.on("disconnect", (reason) => {
-    const u = state.usersBySocket.get(socket.id);
+  /* ── disconnect ───────────────────────────────────── */
+  socket.on("disconnect", reason => {
+    const u = STATE.bySocket.get(socket.id);
 
-    removeFromWaiting(socket.id);
+    removeWaiting(socket.id);
     if (u?.roomId) leaveRoom(socket.id, "disconnect");
 
     if (u) {
-      state.usersBySocket.delete(socket.id);
-      if (state.socketsByName.get(u.name) === socket.id) {
-        state.socketsByName.delete(u.name);
-      }
+      STATE.bySocket.delete(socket.id);
+      if (STATE.byName.get(u.name) === socket.id) STATE.byName.delete(u.name);
     }
 
-    state.buckets.delete(socket.id);
-
+    STATE.buckets.delete(socket.id);
     emitGlobalStats();
     emitAdminSnapshot();
 
@@ -1145,36 +1012,33 @@ io.on("connection", (socket) => {
   });
 });
 
-/* ===================== Start ===================== */
+/* ──────────────────────────────────────────────────────────
+   START
+────────────────────────────────────────────────────────── */
 server.listen(PORT, "0.0.0.0", () => {
   info("server_start", {
-    port: PORT,
-    env: NODE_ENV,
-    aiProvider: AI_PROVIDER,
+    port: PORT, env: NODE_ENV,
+    aiProvider: AI_PROVIDER, aiConfigured: aiConfigured(),
     stun: STUN,
     turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
     forceRelay: FORCE_RELAY,
-    aiConfigured: getAiConfigured()
   });
 
-  if (!ADMIN_TOKEN || String(ADMIN_TOKEN).includes("PASTE_YOUR")) warn("ADMIN_TOKEN is missing — admin actions disabled.");
-  if (AI_PROVIDER === "groq" && (!GROQ_API_KEY || String(GROQ_API_KEY).includes("PASTE_YOUR"))) warn("GROQ_API_KEY missing — AI replies will show config warning.");
-  if (AI_PROVIDER === "xai" && (!XAI_API_KEY || String(XAI_API_KEY).includes("PASTE_YOUR"))) warn("XAI_API_KEY missing — AI replies will show config warning.");
-  if (AI_PROVIDER === "gemini" && (!GEMINI_API_KEY || String(GEMINI_API_KEY).includes("PASTE_YOUR"))) warn("GEMINI_API_KEY missing — AI replies will show config warning.");
+  if (!ADMIN_TOKEN)    warn("ADMIN_TOKEN not set — admin actions disabled.");
+  if (!aiConfigured()) warn(`AI_PROVIDER="${AI_PROVIDER}" API key missing — AI replies will show error.`);
 });
 
-/* ===================== Graceful shutdown ===================== */
+/* ──────────────────────────────────────────────────────────
+   GRACEFUL SHUTDOWN
+────────────────────────────────────────────────────────── */
 function shutdown(signal) {
   warn("shutdown", { signal });
   try {
-    io.close(() => {
-      server.close(() => process.exit(0));
-    });
-  } catch {
+    io.close(() => server.close(() => process.exit(0)));
+  } catch (_) {
     process.exit(0);
   }
   setTimeout(() => process.exit(1), 8000).unref();
 }
-
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGINT",  () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
