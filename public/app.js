@@ -1,1336 +1,1248 @@
-// public/app.js
 // ============================================================
-// WonderTalk — app.js (Senior, full, no-shortcuts style)
-// Tabs:
-//   - Home: practice stats + calendar (local)
-//   - Leaderboard: ratings
-//   - Conversation: matching (Male/Female/Any + AI) + level + Human voice + AI Coach voice
-//
-// Notes about VOICE with real friends (far networks):
-//   - STUN works only in many cases. Some networks require TURN (relay).
-//   - If you see "Voice failed ❌ (TURN required...)" — set TURN_* env on server.
+//  WonderTalk — app.js
+//  Fully matches index.html IDs & style.css classes
 // ============================================================
-
 "use strict";
 
-/* ===================== Socket ===================== */
+/* ─────────────────────────────────────────────────────────
+   SOCKET
+───────────────────────────────────────────────────────── */
 const socket = io();
 
-/* ===================== DOM helpers ===================== */
-const $ = (id) => document.getElementById(id);
-const show = (node, yes) => { if (!node) return; node.style.display = yes ? "" : "none"; };
-const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+/* ─────────────────────────────────────────────────────────
+   DOM HELPERS
+───────────────────────────────────────────────────────── */
+const $   = id  => document.getElementById(id);
+const qs  = sel => document.querySelector(sel);
+const now = ()  => Date.now();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, +v || 0));
 
-function escapeHtml(s) {
+/** Safely show/hide an element via display style */
+function show(el, visible, as = "") {
+  if (!el) return;
+  el.style.display = visible ? (as || "") : "none";
+}
+
+/** HTML-escape a value */
+function esc(s) {
   return String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
-function appendMsg(container, from, text) {
-  if (!container) return;
-  const box = document.createElement("div");
-  box.className = "msg";
-  box.innerHTML = `
-    <div class="from">${escapeHtml(from)}</div>
-    <div class="bubble">${escapeHtml(text)}</div>
-  `;
-  container.appendChild(box);
-  container.scrollTop = container.scrollHeight;
+/**
+ * Append a chat bubble to a message container.
+ * kind: "me" | "sys" | "" (partner)
+ */
+function addMsg(boxId, from, text, kind = "") {
+  const box = $(boxId);
+  if (!box) return;
+  const wrap = document.createElement("div");
+  wrap.className = "msg-item" + (kind ? " " + kind : "");
+  wrap.innerHTML =
+    `<div class="msg-from">${esc(from)}</div>` +
+    `<div class="msg-bubble">${esc(text)}</div>`;
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
 }
 
-/* ===================== Elements ===================== */
-const el = {
-  // screens
-  screenName: $("screenName"),
-  screenMain: $("screenMain"),
-  bannedScreen: $("bannedScreen"),
+/* ─────────────────────────────────────────────────────────
+   LOCAL STORAGE KEYS
+───────────────────────────────────────────────────────── */
+const LS_NAME = "wt_name_v5";
+const LS_PRAC = "wt_prac_v5";
 
-  // register
-  nameInput: $("nameInput"),
-  btnJoin: $("btnJoin"),
-  btnLogout: $("btnLogout"),
-  nameErr: $("nameErr"),
+/* ─────────────────────────────────────────────────────────
+   APP STATE
+───────────────────────────────────────────────────────── */
+const S = {
+  /* user */
+  name: "",
 
-  // header
-  meName: $("meName"),
-  statOnline: $("statOnline"),
-  statWaiting: $("statWaiting"),
-  statRooms: $("statRooms"),
-
-  // AI score bar
-  scoreBar: $("scoreBar"),
-  myBand: $("myBand"),
-  myFlu: $("myFlu"),
-  myGra: $("myGra"),
-  myVoc: $("myVoc"),
-  myPro: $("myPro"),
-
-  // tabs
-  tabHome: $("tabHome"),
-  tabLb: $("tabLb"),
-  tabAi: $("tabAi"),
-
-  navHome: $("navHome"),
-  navLb: $("navLb"),
-  navAi: $("navAi"),
-
-  // Home (stats+calendar) — these ids must exist in your updated index.html
-  // If you haven't added them yet, add placeholders:
-  //   <div id="homeSessions"></div> etc...
-  homeSessions: $("homeSessions"),
-  homePracticeDays: $("homePracticeDays"),
-  homeMinutes: $("homeMinutes"),
-  homeStreak: $("homeStreak"),
-  homeMissed: $("homeMissed"),
-
-  calTitle: $("calTitle"),
-  calPrev: $("calPrev"),
-  calNext: $("calNext"),
-  calGrid: $("calGrid"),
-
-  // Leaderboard
-  btnLb: $("btnLb"),
-  leaderboard: $("leaderboard"),
-
-  // Conversation / Matching (Human + AI option)
-  prefsPanel: $("prefsPanel"),
-  searchInfo: $("searchInfo"),
-  btnFind: $("btnFind"),
-  btnStop: $("btnStop"),
-
-  // chips (query selectors)
-  chipsGender: "[data-gender]",
-  chipsLevel: "[data-level]",
-
-  // Human chat
-  chatPanel: $("chatPanel"),
-  partnerName: $("partnerName"),
-  btnLeave: $("btnLeave"),
-  btnReport: $("btnReport"),
-  voiceHint: $("voiceHint"),
-  btnVoice: $("btnVoice"),
-  remoteAudio: $("remoteAudio"),
-
-  qText: $("qText"),
-  qIndex: $("qIndex"),
-  qPrev: $("qPrev"),
-  qNext: $("qNext"),
-
-  messages: $("messages"),
-  msgInput: $("msgInput"),
-  btnSend: $("btnSend"),
-
-  // rating buttons have .rateBtn
-  rateBtns: document.querySelectorAll(".rateBtn"),
-
-  // AI Coach (Conversation AI)
-  btnStartAi: $("btnStartAi"),
-  btnAiVoice: $("btnAiVoice"),
-  btnAiLeave: $("btnAiLeave"),
-  aiHint: $("aiHint"),
-  aiMessages: $("aiMessages"),
-  aiInput: $("aiInput"),
-  btnAiSend: $("btnAiSend"),
-
-  aiReportCard: $("aiReportCard"),
-  aiReportSummary: $("aiReportSummary"),
-  aiReportList: $("aiReportList"),
-
-  // ADDED (optional UI) — agar index.html da bo‘lmasa ham ishlashda xalaqit bermaydi
-  netBadge: $("netBadge"),
-};
-
-/* ===================== Local Storage Keys ===================== */
-const LS_NAME = "wt_name_v4";
-const LS_PRACTICE = "wt_practice_v4"; // local stats + days
-// Practice schema:
-// {
-//   sessions: number,
-//   minutes: number,
-//   practicedDays: { "YYYY-MM-DD": { minutes: number, sessions: number } }
-// }
-
-/* ===================== State ===================== */
-const state = {
-  me: { name: null },
+  /* matching preferences */
   prefs: { gender: "Any", level: "Any" },
 
-  // current human room
-  current: {
-    roomId: null,
+  /* human room */
+  room: {
+    id: null,
     partner: null,
-    polite: false,
-    connectedAt: 0,
+    polite: false,   // perfect-negotiation role
   },
 
-  // ai room
-  ai: {
-    roomId: null,
-    startedAt: 0,
-  },
+  /* ai room */
+  ai: { id: null },
 
-  // questions
-  QUESTIONS: [],
+  /* questions from server */
+  questions: [],
   qIdx: 0,
 
-  // rtc
-  rtcIceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  /* WebRTC */
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   forceRelay: false,
+  audioWarm:  false,
+  pc:         null,
+  stream:     null,      // local microphone stream
+  voiceOn:    false,
+  makingOffer:  false,
+  ignoreOffer:  false,
 
-  // audio warmup
-  audioWarm: false,
+  /* AI voice (SpeechRecognition + TTS) */
+  aiListening:  false,
+  aiSpeaking:   false,
+  aiLastText:   "",
+  aiRec:        null,
+  aiAutoStop:   null,
 
-  // human voice
-  pc: null,
-  localStream: null,
-  voiceOn: false,
-  makingOffer: false,
-  ignoreOffer: false,
+  /* practice data */
+  prac: { sessions: 0, minutes: 0, days: {} },
+  cal:  { y: new Date().getFullYear(), m: new Date().getMonth() },
 
-  // AI voice turn-taking (SpeechRecognition + TTS)
-  aiMode: {
-    listening: false,
-    speaking: false,
-    lastUserText: "",
-    autoStopTimer: null,
-    recognition: null,
-  },
+  /* session timing */
+  humanTs: 0,
+  aiTs:    0,
 
-  // practice local
-  practice: {
-    sessions: 0,
-    minutes: 0,
-    practicedDays: {},
-  },
-
-  // calendar view month
-  cal: {
-    viewYear: new Date().getFullYear(),
-    viewMonth: new Date().getMonth(), // 0..11
-  },
-
-  // ADDED: client rate-limit + session tracker
-  ux: {
-    lastSendAt: 0,
-    sendCooldownMs: 450,
-    lastAiSendAt: 0,
-    aiCooldownMs: 450,
-  },
-
-  session: {
-    humanStartedAt: 0,
-    aiStartedAt: 0,
-  }
+  /* send cooldown */
+  lastHumanSend: 0,
+  lastAiSend:    0,
+  cdMs: 450,
 };
 
-/* ===================== Senior UX helpers (ADDED) ===================== */
-function setNetBadge(text) {
-  if (!el.netBadge) return;
-  el.netBadge.textContent = text || "";
-  el.netBadge.style.display = text ? "" : "none";
+/* ─────────────────────────────────────────────────────────
+   SCREEN MANAGEMENT
+   Three top-level screens: name / banned / main
+───────────────────────────────────────────────────────── */
+function showScreen(name) {
+  $("sName").style.display   = name === "name"   ? "grid"  : "none";
+  $("sBanned").style.display = name === "banned" ? "grid"  : "none";
+  $("sMain").style.display   = name === "main"   ? "block" : "none";
 }
 
-function nowMs() { return Date.now(); }
-
-function minutesBetween(startMs, endMs) {
-  const ms = Math.max(0, (endMs || 0) - (startMs || 0));
-  // 최소 1 daqiqa: 20s gap ham session hisoblanadi
-  return Math.max(1, Math.round(ms / 60000));
-}
-
-function sessionStart(kind) {
-  if (kind === "human") state.session.humanStartedAt = nowMs();
-  if (kind === "ai") state.session.aiStartedAt = nowMs();
-}
-
-function sessionFinish(kind) {
-  const end = nowMs();
-  if (kind === "human") {
-    if (!state.session.humanStartedAt) return;
-    const mins = minutesBetween(state.session.humanStartedAt, end);
-    state.session.humanStartedAt = 0;
-    markPracticeNow(mins, 1);
-  }
-  if (kind === "ai") {
-    if (!state.session.aiStartedAt) return;
-    const mins = minutesBetween(state.session.aiStartedAt, end);
-    state.session.aiStartedAt = 0;
-    markPracticeNow(mins, 1);
-  }
-}
-
-/* ===================== Tab system ===================== */
-function setTab(name) {
-  // ADDED: AI listening backgroundda qolmasin
-  if (name !== "ai" && state.aiMode.listening) {
-    stopAiListeningOnly();
-    hintAI("AI mic stopped (tab changed).");
+/* ─────────────────────────────────────────────────────────
+   TAB SYSTEM  (Home / Conversation / AI Coach)
+───────────────────────────────────────────────────────── */
+function setTab(tab) {
+  /* stop AI mic when leaving AI tab */
+  if (tab !== "ai" && S.aiListening) {
+    stopAiMic();
+    hintAi("Mic stopped (tab changed).");
   }
 
-  show(el.tabHome, name === "home");
-  show(el.tabLb, name === "lb");
-  show(el.tabAi, name === "ai");
+  $("tabHome").style.display = tab === "home" ? "block" : "none";
+  $("tabConv").style.display = tab === "conv" ? "block" : "none";
+  $("tabAi").style.display   = tab === "ai"   ? "block" : "none";
 
-  [el.navHome, el.navLb, el.navAi].forEach((b) => b && b.classList.remove("active"));
-  if (name === "home" && el.navHome) el.navHome.classList.add("active");
-  if (name === "lb" && el.navLb) el.navLb.classList.add("active");
-  if (name === "ai" && el.navAi) el.navAi.classList.add("active");
+  ["navHome", "navConv", "navAi"].forEach(id => $(id)?.classList.remove("active"));
+  const navMap = { home: "navHome", conv: "navConv", ai: "navAi" };
+  $(navMap[tab])?.classList.add("active");
 }
 
-/* ===================== Practice (local) ===================== */
-function yyyyMmDd(d) {
+/* ─────────────────────────────────────────────────────────
+   CONVERSATION SUB-STATES  (idle / prefs / chat)
+───────────────────────────────────────────────────────── */
+function convState(s) {
+  $("convIdle").style.display  = s === "idle"  ? "block" : "none";
+  $("convPrefs").style.display = s === "prefs" ? "block" : "none";
+  $("convChat").style.display  = s === "chat"  ? "block" : "none";
+}
+
+/* ─────────────────────────────────────────────────────────
+   HINT HELPERS
+───────────────────────────────────────────────────────── */
+function hintVoice(txt) {
+  const el = $("voiceHint");
+  if (!el) return;
+  el.textContent    = txt || "";
+  el.style.display  = txt ? "block" : "none";
+}
+
+function hintAi(html) {
+  const el = $("aiHintBar");
+  if (el) el.innerHTML = html || "";
+}
+
+function hintSearch(txt) {
+  const el = $("searchInfo");
+  if (el) el.textContent = txt || "";
+}
+
+/* ─────────────────────────────────────────────────────────
+   NET BADGE
+───────────────────────────────────────────────────────── */
+function netBadge(txt) {
+  const el = $("netBadge");
+  if (!el) return;
+  el.textContent   = txt || "";
+  el.style.display = txt ? "inline-flex" : "none";
+}
+
+/* ─────────────────────────────────────────────────────────
+   PRACTICE  (localStorage)
+───────────────────────────────────────────────────────── */
+function dKey(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
-function loadPractice() {
+function loadPrac() {
   try {
-    const raw = localStorage.getItem(LS_PRACTICE);
-    if (!raw) return;
-    const j = JSON.parse(raw);
-    if (typeof j.sessions === "number") state.practice.sessions = j.sessions;
-    if (typeof j.minutes === "number") state.practice.minutes = j.minutes;
-    if (j.practicedDays && typeof j.practicedDays === "object") state.practice.practicedDays = j.practicedDays;
-  } catch {}
+    const j = JSON.parse(localStorage.getItem(LS_PRAC) || "{}");
+    if (typeof j.sessions === "number") S.prac.sessions = j.sessions;
+    if (typeof j.minutes  === "number") S.prac.minutes  = j.minutes;
+    if (j.days && typeof j.days === "object") S.prac.days = j.days;
+  } catch (_) {}
 }
 
-function savePractice() {
-  try {
-    localStorage.setItem(LS_PRACTICE, JSON.stringify(state.practice));
-  } catch {}
+function savePrac() {
+  try { localStorage.setItem(LS_PRAC, JSON.stringify(S.prac)); } catch (_) {}
 }
 
-function markPracticeNow(minutesAdd = 1, sessionsAdd = 0) {
-  const key = yyyyMmDd(new Date());
-  if (!state.practice.practicedDays[key]) state.practice.practicedDays[key] = { minutes: 0, sessions: 0 };
-  state.practice.practicedDays[key].minutes += Math.max(0, Number(minutesAdd) || 0);
-  state.practice.practicedDays[key].sessions += Math.max(0, Number(sessionsAdd) || 0);
-
-  state.practice.minutes += Math.max(0, Number(minutesAdd) || 0);
-  state.practice.sessions += Math.max(0, Number(sessionsAdd) || 0);
-
-  savePractice();
-  renderHomeStats();
-  renderCalendar();
+function markPrac(mins = 0, sess = 0) {
+  const k = dKey(new Date());
+  if (!S.prac.days[k]) S.prac.days[k] = { minutes: 0, sessions: 0 };
+  S.prac.days[k].minutes  += Math.max(0, mins);
+  S.prac.days[k].sessions += Math.max(0, sess);
+  S.prac.minutes  += Math.max(0, mins);
+  S.prac.sessions += Math.max(0, sess);
+  savePrac();
+  renderStats();
+  renderCal();
 }
 
-function calcPracticeDaysCount() {
-  return Object.keys(state.practice.practicedDays || {}).length;
-}
+function pracDays()  { return Object.keys(S.prac.days || {}).length; }
 
 function calcStreak() {
-  // streak = consecutive days practiced up to today
-  const days = state.practice.practicedDays || {};
-  let streak = 0;
   const d = new Date();
+  let streak = 0;
   for (let i = 0; i < 3650; i++) {
-    const k = yyyyMmDd(d);
-    if (days[k]) streak++;
+    if (S.prac.days[dKey(d)]) streak++;
     else break;
     d.setDate(d.getDate() - 1);
   }
   return streak;
 }
 
-function calcMissedLast7() {
-  // missed days in last 7 (including today): 7 - practicedDaysCountInWindow
-  const days = state.practice.practicedDays || {};
-  let practiced = 0;
+function calcMissed7() {
   const d = new Date();
+  let p = 0;
   for (let i = 0; i < 7; i++) {
-    const k = yyyyMmDd(d);
-    if (days[k]) practiced++;
+    if (S.prac.days[dKey(d)]) p++;
     d.setDate(d.getDate() - 1);
   }
-  return Math.max(0, 7 - practiced);
+  return Math.max(0, 7 - p);
 }
 
-function renderHomeStats() {
-  // if elements not present, just skip
-  const sessions = state.practice.sessions || 0;
-  const minutes = state.practice.minutes || 0;
-  const practiceDays = calcPracticeDaysCount();
-  const streak = calcStreak();
-  const missed = calcMissedLast7();
-
-  if (el.homeSessions) el.homeSessions.textContent = String(sessions);
-  if (el.homePracticeDays) el.homePracticeDays.textContent = String(practiceDays);
-  if (el.homeMinutes) el.homeMinutes.textContent = String(minutes);
-  if (el.homeStreak) el.homeStreak.textContent = String(streak);
-  if (el.homeMissed) el.homeMissed.textContent = String(missed);
+/* Session timing helpers */
+function sessionStart(kind) {
+  if (kind === "human") S.humanTs = now();
+  if (kind === "ai")    S.aiTs    = now();
 }
 
-/* ===================== Calendar ===================== */
-const MONTHS = [
+function sessionEnd(kind) {
+  const end = now();
+  if (kind === "human" && S.humanTs) {
+    markPrac(Math.max(1, Math.round((end - S.humanTs) / 60000)), 1);
+    S.humanTs = 0;
+  }
+  if (kind === "ai" && S.aiTs) {
+    markPrac(Math.max(1, Math.round((end - S.aiTs) / 60000)), 1);
+    S.aiTs = 0;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: STATS
+───────────────────────────────────────────────────────── */
+function renderStats() {
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v); };
+  set("hSessions", S.prac.sessions);
+  set("hDays",     pracDays());
+  set("hMinutes",  S.prac.minutes);
+  set("hStreak",   calcStreak());
+  set("hMissed",   calcMissed7());
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: CALENDAR
+───────────────────────────────────────────────────────── */
+const MONTH_NAMES = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December"
 ];
-const DOW = ["S","M","T","W","T","F","S"];
 
-function renderCalendar() {
-  if (!el.calGrid || !el.calTitle) return;
+function renderCal() {
+  const grid  = $("calGrid");
+  const title = $("calTitle");
+  if (!grid || !title) return;
 
-  const year = state.cal.viewYear;
-  const month = state.cal.viewMonth;
+  const { y, m } = S.cal;
+  title.textContent = `${MONTH_NAMES[m]} ${y}`;
+  grid.innerHTML    = "";
 
-  el.calTitle.textContent = `${MONTHS[month]} ${year}`;
+  const firstDow    = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const prevDays    = new Date(y, m, 0).getDate();
+  const todayKey    = dKey(new Date());
 
-  // clear
-  el.calGrid.innerHTML = "";
-
-  const first = new Date(year, month, 1);
-  const firstDow = first.getDay(); // 0..6
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  // previous month days to fill
-  const prevDays = new Date(year, month, 0).getDate();
-
-  const todayKey = yyyyMmDd(new Date());
-  const practicedDays = state.practice.practicedDays || {};
-
-  // we render 6 rows (42 cells) stable layout
-  const totalCells = 42;
-  for (let idx = 0; idx < totalCells; idx++) {
+  for (let i = 0; i < 42; i++) {
     const cell = document.createElement("div");
-    cell.className = "calCell";
+    cell.className = "cal-cell";
 
-    const dayNum = idx - firstDow + 1;
+    const n = i - firstDow + 1;
+    let k   = null;
 
-    let dKey = null;
-
-    if (dayNum <= 0) {
-      // prev month
-      const d = prevDays + dayNum;
-      cell.textContent = String(d);
-      cell.classList.add("mutedDay");
-      const prevDate = new Date(year, month - 1, d);
-      dKey = yyyyMmDd(prevDate);
-    } else if (dayNum > daysInMonth) {
-      // next month
-      const d = dayNum - daysInMonth;
-      cell.textContent = String(d);
-      cell.classList.add("mutedDay");
-      const nextDate = new Date(year, month + 1, d);
-      dKey = yyyyMmDd(nextDate);
+    if (n <= 0) {
+      const pd = prevDays + n;
+      cell.textContent = String(pd);
+      cell.classList.add("dim");
+      k = dKey(new Date(y, m - 1, pd));
+    } else if (n > daysInMonth) {
+      const nd = n - daysInMonth;
+      cell.textContent = String(nd);
+      cell.classList.add("dim");
+      k = dKey(new Date(y, m + 1, nd));
     } else {
-      // current month
-      cell.textContent = String(dayNum);
-      const curDate = new Date(year, month, dayNum);
-      dKey = yyyyMmDd(curDate);
+      cell.textContent = String(n);
+      k = dKey(new Date(y, m, n));
     }
 
-    // today highlight
-    if (dKey === todayKey) cell.classList.add("today");
-    // practiced highlight
-    if (practicedDays[dKey]) cell.classList.add("practiced");
+    if (k === todayKey)      cell.classList.add("today");
+    if (S.prac.days[k])     cell.classList.add("done");
 
-    // click -> show mini info (optional)
     cell.addEventListener("click", () => {
-      if (!dKey) return;
-      const info = practicedDays[dKey];
-      if (info) {
-        // show in hint area (reuse AI hint if exists)
-        if (el.aiHint) el.aiHint.textContent = `Practice on ${dKey}: ${info.minutes} min, ${info.sessions} sessions.`;
+      if (k && S.prac.days[k]) {
+        const d = S.prac.days[k];
+        hintAi(`📅 ${k}: ${d.minutes} min, ${d.sessions} sessions`);
       }
     });
 
-    el.calGrid.appendChild(cell);
+    grid.appendChild(cell);
   }
 }
 
-/* ===================== Score UI ===================== */
-function updateScore(aiScore) {
-  if (!aiScore) return;
-  if (el.scoreBar) el.scoreBar.style.display = "";
-  if (el.myBand) el.myBand.textContent = String(aiScore.band ?? "—");
-  if (el.myFlu) el.myFlu.textContent = String(aiScore.fluency ?? "—");
-  if (el.myGra) el.myGra.textContent = String(aiScore.grammar ?? "—");
-  if (el.myVoc) el.myVoc.textContent = String(aiScore.vocab ?? "—");
-  if (el.myPro) el.myPro.textContent = String(aiScore.pronunciation ?? "—");
+/* ─────────────────────────────────────────────────────────
+   RENDER: AI SCORE BAR
+───────────────────────────────────────────────────────── */
+function renderScore(sc) {
+  if (!sc) return;
+  const bar = $("scoreBar");
+  if (bar) bar.style.display = "grid";
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? "—"); };
+  set("myBand", sc.band);
+  set("myFlu",  sc.fluency);
+  set("myGra",  sc.grammar);
+  set("myVoc",  sc.vocab);
+  set("myPro",  sc.pronunciation);
 }
 
-/* ===================== Questions ===================== */
-function renderQuestion() {
-  const total = state.QUESTIONS.length || 10;
-  state.qIdx = clamp(state.qIdx, 0, total - 1);
+/* ─────────────────────────────────────────────────────────
+   RENDER: ONLINE USERS LIST
+───────────────────────────────────────────────────────── */
+function renderOnline(users) {
+  const list = $("onlineList");
+  const cnt  = $("onlineCount");
+  if (!list) return;
 
-  if (el.qIndex) el.qIndex.textContent = String(state.qIdx + 1);
-  if (el.qText) el.qText.textContent = state.QUESTIONS[state.qIdx] || "Loading questions...";
+  const all = Array.isArray(users) ? users : [];
+  if (cnt) cnt.textContent = String(all.length);
 
-  if (el.qPrev) {
-    el.qPrev.disabled = state.qIdx === 0;
-    el.qPrev.style.opacity = el.qPrev.disabled ? ".45" : "1";
+  /* exclude self */
+  const others = all.filter(u => u.name !== S.name);
+
+  if (!others.length) {
+    list.innerHTML = `<div class="empty-state">No one else online right now. Invite a friend!</div>`;
+    return;
   }
-  if (el.qNext) {
-    el.qNext.disabled = state.qIdx === total - 1;
-    el.qNext.style.opacity = el.qNext.disabled ? ".45" : "1";
+
+  list.innerHTML = "";
+  others.forEach(u => {
+    const row = document.createElement("div");
+    row.className = "ol-row";
+
+    const ini  = (u.name || "?")[0].toUpperCase();
+    const meta = [
+      u.gender !== "Any" ? u.gender : null,
+      u.level  !== "Any" ? u.level  : null,
+    ].filter(Boolean).join(" · ");
+
+    const statusHtml = u.roomId
+      ? `<span class="ol-status" style="color:var(--dim);">In session</span>`
+      : `<span class="ol-status" style="color:#86efac;">Available</span>`;
+
+    row.innerHTML = `
+      <div class="ol-avatar">${esc(ini)}</div>
+      <div class="ol-name">${esc(u.name)}</div>
+      <div class="ol-meta">${esc(meta)}</div>
+      ${statusHtml}
+      <div class="ol-dot"></div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: ICEBREAKER QUESTION
+───────────────────────────────────────────────────────── */
+function renderQ() {
+  const total = S.questions.length || 10;
+  S.qIdx = clamp(S.qIdx, 0, total - 1);
+
+  const qi = $("qIdx");  if (qi) qi.textContent = String(S.qIdx + 1);
+  const qt = $("qText"); if (qt) qt.textContent = S.questions[S.qIdx] || "Loading questions…";
+
+  const prev = $("qPrev");
+  const next = $("qNext");
+  if (prev) { prev.disabled = S.qIdx === 0;          prev.style.opacity = prev.disabled ? ".3" : "1"; }
+  if (next) { next.disabled = S.qIdx === total - 1;  next.style.opacity = next.disabled ? ".3" : "1"; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: LEADERBOARD
+───────────────────────────────────────────────────────── */
+function renderLb(rows) {
+  const el = $("leaderboard");
+  if (!el) return;
+
+  const arr = Array.isArray(rows) ? rows : [];
+  if (!arr.length) {
+    el.innerHTML = `<div class="empty-state">No ratings yet.</div>`;
+    return;
   }
+
+  el.innerHTML = "";
+  arr.slice(0, 20).forEach((x, i) => {
+    const row = document.createElement("div");
+    row.className = "lb-row";
+    const rankClass = i === 0 ? "lb-rank g1" : i === 1 ? "lb-rank g2" : i === 2 ? "lb-rank g3" : "lb-rank";
+    row.innerHTML = `
+      <div class="${rankClass}">${i + 1}</div>
+      <div class="lb-name">${esc(x.name)}</div>
+      <div class="lb-badge">⭐ ${esc(String(x.avg))} <span style="opacity:.6;">(${esc(String(x.count))})</span></div>
+    `;
+    el.appendChild(row);
+  });
 }
 
-/* ===================== UI resets ===================== */
-function hintHuman(text) {
-  if (!el.voiceHint) return;
-  el.voiceHint.style.display = text ? "" : "none";
-  el.voiceHint.textContent = text || "";
+/* ─────────────────────────────────────────────────────────
+   CHIPS  (gender / level selection)
+───────────────────────────────────────────────────────── */
+function syncChips(groupId, activeVal) {
+  const g = $(groupId);
+  if (!g) return;
+  g.querySelectorAll(".chip").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.val === activeVal);
+  });
 }
 
-function hintAI(text) {
-  if (!el.aiHint) return;
-  el.aiHint.textContent = text || "";
-}
+/* ─────────────────────────────────────────────────────────
+   RESET HELPERS
+───────────────────────────────────────────────────────── */
+function resetConv() {
+  const msgs = $("messages"); if (msgs) msgs.innerHTML = "";
+  const mi   = $("msgInput"); if (mi)   mi.value       = "";
 
-function resetHumanUI() {
-  if (el.searchInfo) el.searchInfo.textContent = "";
-  if (el.messages) el.messages.innerHTML = "";
-  if (el.msgInput) el.msgInput.value = "";
-  if (el.partnerName) el.partnerName.textContent = "—";
+  S.room  = { id: null, partner: null, polite: false };
+  S.qIdx  = 0;
+  S.humanTs = 0;
 
-  state.current.roomId = null;
-  state.current.partner = null;
-  state.current.connectedAt = 0;
-
-  state.qIdx = 0;
-  renderQuestion();
-
-  show(el.chatPanel, false);
-  show(el.prefsPanel, true);
-
-  hintHuman("");
-
+  renderQ();
+  hintVoice("");
+  hintSearch("");
   stopVoice().catch(() => {});
+  convState("idle");
 }
 
-function resetAIUI() {
-  state.ai.roomId = null;
-  state.ai.startedAt = 0;
+function resetAi() {
+  const am = $("aiMessages"); if (am) am.innerHTML = "";
+  const ai = $("aiInput");    if (ai) ai.value     = "";
+  const ar = $("aiReport");   if (ar) ar.style.display = "none";
 
-  if (el.aiMessages) el.aiMessages.innerHTML = "";
-  if (el.aiInput) el.aiInput.value = "";
-  if (el.aiReportCard) el.aiReportCard.style.display = "none";
+  S.ai   = { id: null };
+  S.aiTs = 0;
 
-  stopAiListeningOnly();
+  stopAiMic();
   setAiVoiceBtn();
-  hintAI("Press Start AI to begin.");
+  hintAi("Press <strong>Start AI</strong> below to begin your session.");
 }
 
-/* ===================== Chips ===================== */
-function setChipGroup(selector, key) {
-  document.querySelectorAll(selector).forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset[key] === state.prefs[key]);
-  });
-}
-
-function wireChips() {
-  document.querySelectorAll(el.chipsGender).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.prefs.gender = btn.dataset.gender;
-      setChipGroup(el.chipsGender, "gender");
-    });
-  });
-
-  document.querySelectorAll(el.chipsLevel).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.prefs.level = btn.dataset.level;
-      setChipGroup(el.chipsLevel, "level");
-    });
-  });
-
-  setChipGroup(el.chipsGender, "gender");
-  setChipGroup(el.chipsLevel, "level");
-}
-
-/* ===================== WebRTC config ===================== */
-async function loadRtcConfig() {
+/* ─────────────────────────────────────────────────────────
+   RTC CONFIG  (fetch /webrtc-config)
+───────────────────────────────────────────────────────── */
+async function loadRtcCfg() {
   try {
     const r = await fetch("/webrtc-config");
     const j = await r.json();
-    if (j?.iceServers?.length) state.rtcIceServers = j.iceServers;
-    state.forceRelay = !!j?.forceRelay;
-  } catch {
-    // keep default stun
-  }
+    if (Array.isArray(j?.iceServers) && j.iceServers.length) S.iceServers = j.iceServers;
+    S.forceRelay = !!j?.forceRelay;
+  } catch (_) {}
 }
 
-/* ===================== Audio warmup ===================== */
-async function warmupAudioOnce() {
-  if (state.audioWarm) return;
-  state.audioWarm = true;
-
-  if (!el.remoteAudio) return;
-
-  try {
-    el.remoteAudio.muted = true;
-    await el.remoteAudio.play().catch(() => {});
-    el.remoteAudio.muted = false;
-  } catch {}
+/* ─────────────────────────────────────────────────────────
+   AUDIO WARM-UP  (unlock autoplay on mobile)
+───────────────────────────────────────────────────────── */
+async function warmAudio() {
+  if (S.audioWarm) return;
+  S.audioWarm = true;
+  const a = $("remoteAudio");
+  if (!a) return;
+  try { a.muted = true; await a.play().catch(() => {}); a.muted = false; } catch (_) {}
 }
 
-/* ===================== Register/Login ===================== */
-function register(name) {
-  if (el.nameErr) el.nameErr.textContent = "";
-  socket.emit("user:register", { name });
-}
+/* ─────────────────────────────────────────────────────────
+   WebRTC  ——  ONE-WAY VOICE READY
 
-/* ===================== Conversation actions (match) ===================== */
-function matchStart() {
-  warmupAudioOnce().catch(() => {});
-  if (el.searchInfo) el.searchInfo.textContent = "Searching…";
-  socket.emit("match:start", { gender: state.prefs.gender, level: state.prefs.level });
-}
-
-function matchStop() {
-  socket.emit("match:stop");
-  if (el.searchInfo) el.searchInfo.textContent = "";
-}
-
-/* ===================== Human messaging ===================== */
-function sendHumanMsg() {
-  const t = nowMs();
-  if (t - state.ux.lastSendAt < state.ux.sendCooldownMs) {
-    hintHuman("Too fast… slow down 🙂");
-    return;
-  }
-  state.ux.lastSendAt = t;
-
-  const text = (el.msgInput?.value || "").trim();
-  if (!text || !state.current.roomId) return;
-  el.msgInput.value = "";
-  socket.emit("chat:message", { roomId: state.current.roomId, text });
-  markPracticeNow(0, 0);
-}
-
-/* ===================== AI messaging (typed) ===================== */
-function sendAiText() {
-  const t = nowMs();
-  if (t - state.ux.lastAiSendAt < state.ux.aiCooldownMs) {
-    hintAI("Too fast… wait 🙂");
-    return;
-  }
-  state.ux.lastAiSendAt = t;
-
-  const text = (el.aiInput?.value || "").trim();
-  if (!text || !state.ai.roomId) return;
-  el.aiInput.value = "";
-  appendMsg(el.aiMessages, state.me.name, text);
-  socket.emit("chat:message", { roomId: state.ai.roomId, text });
-  markPracticeNow(1, 0);
-  hintAI("Sent ✅ Waiting AI…");
-}
-
-/* ===================== Rating & Report ===================== */
-function setActiveRate(stars) {
-  const s = clamp(Number(stars) || 0, 1, 5);
-  el.rateBtns?.forEach((b) => b.classList.toggle("active", Number(b.dataset.rate) === s));
-}
-
-function ratePartner(stars) {
-  if (!state.current.roomId) return;
-  setActiveRate(stars);
-  socket.emit("rate:partner", { roomId: state.current.roomId, stars });
-}
-
-function reportPartner() {
-  if (!state.current.roomId) return;
-  socket.emit("report:partner", { roomId: state.current.roomId });
-}
-
-/* ===================== Icebreaker navigation ===================== */
-function iceNav(dir) {
-  if (!state.current.roomId) return;
-  socket.emit("icebreaker:nav", { roomId: state.current.roomId, dir });
-}
-
-/* ===================== Human Voice (WebRTC) ===================== */
+   Core idea:
+     • When partner presses "Voice On" they emit webrtc:offer.
+     • We ALWAYS answer that offer even if WE haven't pressed
+       Voice On yet — this lets us HEAR them immediately.
+     • If WE then press Voice On, we add our tracks and
+       renegotiation happens automatically.
+     • Result: one-way audio works instantly for the listener.
+───────────────────────────────────────────────────────── */
 function buildPeer() {
-  state.pc = new RTCPeerConnection({
-    iceServers: state.rtcIceServers,
-    iceTransportPolicy: state.forceRelay ? "relay" : "all",
+  destroyPeer();
+
+  S.pc = new RTCPeerConnection({
+    iceServers:         S.iceServers,
+    iceTransportPolicy: S.forceRelay ? "relay" : "all",
   });
 
-  // remote track
-  state.pc.ontrack = (ev) => {
-    const [stream] = ev.streams;
-    if (stream && el.remoteAudio) {
-      el.remoteAudio.srcObject = stream;
-      const p = el.remoteAudio.play();
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    }
+  /* Remote audio → <audio> element */
+  S.pc.ontrack = ev => {
+    const [st] = ev.streams;
+    const a    = $("remoteAudio");
+    if (st && a) { a.srcObject = st; a.play().catch(() => {}); }
   };
 
-  // ice -> server
-  state.pc.onicecandidate = (ev) => {
-    if (ev.candidate && state.current.roomId) {
-      socket.emit("webrtc:ice", { roomId: state.current.roomId, candidate: ev.candidate });
-    }
+  /* ICE candidates → server */
+  S.pc.onicecandidate = ev => {
+    if (ev.candidate && S.room.id)
+      socket.emit("webrtc:ice", { roomId: S.room.id, candidate: ev.candidate });
   };
 
-  // connection status
-  state.pc.onconnectionstatechange = () => {
-    if (!state.pc) return;
-    if (state.pc.connectionState === "connected") {
-      hintHuman("Voice connected ✅");
-    }
-    if (state.pc.connectionState === "failed") {
-      hintHuman("Voice failed ❌ (TURN required for far networks)");
-    }
-    if (state.pc.connectionState === "disconnected") {
-      hintHuman("Voice disconnected.");
-    }
+  /* Connection state feedback */
+  S.pc.onconnectionstatechange = () => {
+    if (!S.pc) return;
+    const cs = S.pc.connectionState;
+    if (cs === "connected")    hintVoice("Voice connected ✅");
+    if (cs === "failed")       hintVoice("Voice failed ❌  (check network / TURN required)");
+    if (cs === "disconnected") hintVoice("Voice disconnected.");
   };
 
-  // negotiation (perfect negotiation base)
-  state.pc.onnegotiationneeded = async () => {
+  /* Renegotiation needed → create offer */
+  S.pc.onnegotiationneeded = async () => {
     try {
-      state.makingOffer = true;
-      const offer = await state.pc.createOffer({ offerToReceiveAudio: true });
-      if (!state.pc || state.pc.signalingState !== "stable") return;
-      await state.pc.setLocalDescription(offer);
-      socket.emit("webrtc:offer", { roomId: state.current.roomId, sdp: state.pc.localDescription });
-    } catch (e) {
-      hintHuman("Negotiation error.");
+      S.makingOffer = true;
+      const offer = await S.pc.createOffer({ offerToReceiveAudio: true });
+      if (!S.pc || S.pc.signalingState !== "stable") return;
+      await S.pc.setLocalDescription(offer);
+      socket.emit("webrtc:offer", { roomId: S.room.id, sdp: S.pc.localDescription });
+    } catch (_) {
+      hintVoice("Offer error.");
     } finally {
-      state.makingOffer = false;
+      S.makingOffer = false;
     }
   };
+}
+
+function destroyPeer() {
+  if (!S.pc) return;
+  try { S.pc.ontrack = null; S.pc.onicecandidate = null; S.pc.onnegotiationneeded = null; } catch (_) {}
+  try { S.pc.close(); } catch (_) {}
+  S.pc = null;
+}
+
+/**
+ * Handle incoming offer from partner.
+ * Always answers, even before local Voice On → one-way audio.
+ */
+async function handleOffer(sdp, from) {
+  if (!S.room.id) return;
+
+  /* Build peer if not yet created (listener receives before pressing Voice On) */
+  if (!S.pc) buildPeer();
+
+  const collision   = S.makingOffer || S.pc.signalingState !== "stable";
+  S.ignoreOffer     = !S.room.polite && collision;
+  if (S.ignoreOffer) return;
+
+  try {
+    await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+    if (sdp.type === "offer") {
+      /* If we already have local stream (Voice On active), add tracks */
+      if (S.stream && S.voiceOn) {
+        const senders = S.pc.getSenders();
+        S.stream.getTracks().forEach(t => {
+          if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
+        });
+      }
+
+      const ans = await S.pc.createAnswer();
+      await S.pc.setLocalDescription(ans);
+      socket.emit("webrtc:answer", { roomId: S.room.id, sdp: S.pc.localDescription });
+
+      /* Inform listener they can now hear partner */
+      hintVoice(`${esc(from)} turned on voice — you can hear them now. Press Voice On to also speak.`);
+    }
+  } catch (_) {
+    hintVoice("Voice connection error.");
+  }
 }
 
 async function startVoice() {
-  if (!state.current.roomId) { hintHuman("Join a room first."); return; }
-  if (state.voiceOn) return;
-  state.voiceOn = true;
-  if (el.btnVoice) el.btnVoice.textContent = "Voice Off";
-  hintHuman("Requesting microphone…");
+  if (!S.room.id)  { hintVoice("Join a room first."); return; }
+  if (S.voiceOn)   return;
+
+  hintVoice("Requesting microphone…");
 
   try {
-    state.localStream = await navigator.mediaDevices.getUserMedia({
+    S.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        sampleRate: 48000,
+        autoGainControl:  true,
+        channelCount:     1,
+        sampleRate:       48000,
       },
       video: false,
     });
-  } catch {
-    state.voiceOn = false;
-    if (el.btnVoice) el.btnVoice.textContent = "Voice On";
-    hintHuman("Microphone blocked. Allow mic permission.");
+  } catch (_) {
+    hintVoice("Microphone access denied. Allow mic in your browser settings.");
     return;
   }
 
-  if (!state.pc) buildPeer();
+  S.voiceOn = true;
+  const btn = $("btnVoice");
+  if (btn) btn.innerHTML = "🔴 Voice Off";
 
-  // add tracks
-  state.localStream.getTracks().forEach((t) => state.pc.addTrack(t, state.localStream));
+  /* Build peer if listener hadn't built it yet */
+  if (!S.pc) buildPeer();
 
-  hintHuman("Mic enabled ✅ Connecting…");
+  /* Add microphone tracks → triggers onnegotiationneeded → offer */
+  const senders = S.pc.getSenders();
+  S.stream.getTracks().forEach(t => {
+    if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
+  });
+
+  hintVoice("Mic on ✅  Connecting voice to partner…");
 }
 
 async function stopVoice() {
-  state.voiceOn = false;
-  if (el.btnVoice) el.btnVoice.textContent = "Voice On";
-  hintHuman("Voice off.");
+  S.voiceOn = false;
 
-  if (state.pc) {
-    try {
-      state.pc.ontrack = null;
-      state.pc.onicecandidate = null;
-      state.pc.onnegotiationneeded = null;
-    } catch {}
-    try { state.pc.close(); } catch {}
-    state.pc = null;
+  const btn = $("btnVoice");
+  if (btn) btn.innerHTML = "🎙️ Voice On";
+  hintVoice("");
+
+  if (S.stream) {
+    S.stream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+    S.stream = null;
   }
 
-  if (state.localStream) {
-    state.localStream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
-    state.localStream = null;
-  }
+  destroyPeer();
 
-  if (el.remoteAudio) el.remoteAudio.srcObject = null;
+  const a = $("remoteAudio");
+  if (a) a.srcObject = null;
 }
 
-/* ===================== AI Voice (SpeechRecognition + TTS) ===================== */
+/* ─────────────────────────────────────────────────────────
+   AI VOICE  (SpeechRecognition + TTS)
+───────────────────────────────────────────────────────── */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-function aiSupported() {
-  return !!SR && !!window.speechSynthesis;
-}
-
-function stopAutoStop() {
-  if (state.aiMode.autoStopTimer) clearTimeout(state.aiMode.autoStopTimer);
-  state.aiMode.autoStopTimer = null;
-}
+const aiOk = () => !!SR && !!window.speechSynthesis;
 
 function setAiVoiceBtn() {
-  if (!el.btnAiVoice) return;
-  el.btnAiVoice.textContent = state.aiMode.listening ? "Voice Off" : "Voice On";
+  const btn = $("btnAiVoice");
+  if (!btn) return;
+  if (S.aiListening) {
+    btn.textContent = "🛑 Voice Off";
+    btn.classList.add("on");
+  } else {
+    btn.textContent = "🎙️ Voice On";
+    btn.classList.remove("on");
+  }
 }
 
-function aiSpeak(text) {
-  return new Promise((resolve) => {
+async function aiSpeak(text) {
+  return new Promise(resolve => {
+    if (!window.speechSynthesis) { resolve(); return; }
     try {
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(String(text || ""));
-      u.lang = "en-US";
-      u.rate = 1;
+      const utt    = new SpeechSynthesisUtterance(String(text || ""));
+      utt.lang     = "en-US";
+      utt.rate     = 1;
+      utt.pitch    = 1;
+      S.aiSpeaking = true;
+      hintAi("AI speaking… 🔊");
 
-      state.aiMode.speaking = true;
-      hintAI("AI speaking… 🔊");
+      utt.onend  = () => { S.aiSpeaking = false; hintAi("Your turn → Voice On → speak → Voice Off 🎙️"); resolve(); };
+      utt.onerror= () => { S.aiSpeaking = false; hintAi("TTS error. Check browser TTS support."); resolve(); };
 
-      u.onend = () => {
-        state.aiMode.speaking = false;
-        hintAI("Your turn: press Voice On and speak 🎙️");
-        resolve();
-      };
-      u.onerror = () => {
-        state.aiMode.speaking = false;
-        hintAI("AI voice error.");
-        resolve();
-      };
-
-      window.speechSynthesis.speak(u);
-    } catch {
-      state.aiMode.speaking = false;
+      window.speechSynthesis.speak(utt);
+    } catch (_) {
+      S.aiSpeaking = false;
       resolve();
     }
   });
 }
 
-function aiStartListening() {
-  if (!state.ai.roomId) { hintAI("Start AI first."); return; }
-  if (!aiSupported()) { hintAI("Use Chrome (SpeechRecognition + TTS required)."); return; }
-  if (state.aiMode.speaking) { hintAI("Wait… AI is speaking."); return; }
-  if (state.aiMode.listening) return;
+function stopAiMic() {
+  clearTimeout(S.aiAutoStop);
+  S.aiAutoStop  = null;
+  S.aiListening = false;
+  setAiVoiceBtn();
+
+  const rec = S.aiRec;
+  S.aiRec = null;
+  try { rec && rec.stop(); } catch (_) {}
+}
+
+function startAiMic() {
+  if (!S.ai.id) { hintAi("Press <strong>Start AI</strong> first."); return; }
+
+  if (!aiOk()) {
+    hintAi("Voice requires Chrome with SpeechRecognition support.");
+    return;
+  }
+  if (S.aiSpeaking) {
+    hintAi("Wait — AI is still speaking…");
+    return;
+  }
+  if (S.aiListening) return;
 
   const rec = new SR();
-  state.aiMode.recognition = rec;
-
-  rec.lang = "en-US";
+  S.aiRec        = rec;
+  rec.lang         = "en-US";
   rec.interimResults = true;
-  rec.continuous = true;
+  rec.continuous   = true;
 
-  state.aiMode.lastUserText = "";
-  state.aiMode.listening = true;
+  S.aiLastText   = "";
+  S.aiListening  = true;
   setAiVoiceBtn();
-  hintAI("Listening… speak now 🎙️ (press Voice Off when finished)");
+  hintAi("Listening… speak now 🎙️  Press <strong>Voice Off</strong> when done.");
 
-  rec.onresult = (e) => {
-    let finalText = "";
+  rec.onresult = e => {
+    let final = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
-      const t = (r[0]?.transcript || "").trim();
-      if (!t) continue;
-      if (r.isFinal) finalText += (finalText ? " " : "") + t;
+      if (r.isFinal) final += (final ? " " : "") + (r[0]?.transcript || "").trim();
     }
+    if (final) S.aiLastText = (S.aiLastText + " " + final).trim();
 
-    if (finalText) {
-      state.aiMode.lastUserText = (state.aiMode.lastUserText + " " + finalText).trim();
-    }
-
-    stopAutoStop();
-    state.aiMode.autoStopTimer = setTimeout(() => {
-      if (state.aiMode.listening) aiStopListeningAndSend();
+    /* Auto-stop after 2.2s silence */
+    clearTimeout(S.aiAutoStop);
+    S.aiAutoStop = setTimeout(() => {
+      if (S.aiListening) stopAiMicAndSend();
     }, 2200);
   };
 
-  rec.onerror = () => {
-    hintAI("Mic error. Allow microphone permission.");
-    stopAiListeningOnly();
+  rec.onerror = () => { hintAi("Mic error."); stopAiMic(); };
+  rec.onend   = () => { if (S.aiListening) { try { rec.start(); } catch (_) {} } };
+
+  try { rec.start(); } catch (_) {}
+}
+
+async function stopAiMicAndSend() {
+  if (!S.aiListening) return;
+  stopAiMic();
+
+  const txt = (S.aiLastText || "").trim();
+  if (!txt) { hintAi("No speech detected. Try again."); return; }
+
+  addMsg("aiMessages", S.name, txt, "me");
+  socket.emit("chat:message", { roomId: S.ai.id, text: txt });
+  markPrac(1, 0);
+  hintAi("Sent ✅  Waiting for AI Coach…");
+}
+
+/* ─────────────────────────────────────────────────────────
+   SEND MESSAGE HELPERS
+───────────────────────────────────────────────────────── */
+function sendHuman() {
+  if (now() - S.lastHumanSend < S.cdMs) { hintVoice("Slow down a bit…"); return; }
+  S.lastHumanSend = now();
+
+  const mi = $("msgInput");
+  const txt = (mi?.value || "").trim();
+  if (!txt || !S.room.id) return;
+  if (mi) mi.value = "";
+  socket.emit("chat:message", { roomId: S.room.id, text: txt });
+}
+
+function sendAi() {
+  if (now() - S.lastAiSend < S.cdMs) { hintAi("Slow down a bit…"); return; }
+  S.lastAiSend = now();
+
+  const ai = $("aiInput");
+  const txt = (ai?.value || "").trim();
+  if (!txt || !S.ai.id) return;
+  if (ai) ai.value = "";
+
+  addMsg("aiMessages", S.name, txt, "me");
+  socket.emit("chat:message", { roomId: S.ai.id, text: txt });
+  markPrac(1, 0);
+  hintAi("Sent ✅  Waiting for AI Coach…");
+}
+
+/* ─────────────────────────────────────────────────────────
+   WIRE: UI EVENTS
+───────────────────────────────────────────────────────── */
+function wireUI() {
+
+  /* ── Name screen ──────────────────────────────────── */
+  const doJoin = () => {
+    const ne  = $("nameErr");
+    const val = ($("nameInput")?.value || "").trim();
+    if (!val) { if (ne) ne.textContent = "Please enter a name."; return; }
+    if (ne) ne.textContent = "";
+    socket.emit("user:register", { name: val });
   };
+  $("btnJoin")?.addEventListener("click", doJoin);
+  $("nameInput")?.addEventListener("keydown", e => { if (e.key === "Enter") doJoin(); });
 
-  rec.onend = () => {
-    // keep alive while in listening mode
-    if (state.aiMode.listening) {
-      try { rec.start(); } catch {}
-    }
-  };
-
-  try { rec.start(); } catch {}
-}
-
-function stopAiListeningOnly() {
-  stopAutoStop();
-  state.aiMode.listening = false;
-  setAiVoiceBtn();
-
-  const rec = state.aiMode.recognition;
-  state.aiMode.recognition = null;
-
-  try { rec && rec.stop(); } catch {}
-}
-
-async function aiStopListeningAndSend() {
-  if (!state.aiMode.listening) return;
-  stopAiListeningOnly();
-
-  const text = (state.aiMode.lastUserText || "").trim();
-  if (!text) { hintAI("No speech detected. Try again."); return; }
-
-  appendMsg(el.aiMessages, state.me.name, text);
-  socket.emit("chat:message", { roomId: state.ai.roomId, text });
-
-  markPracticeNow(1, 0);
-
-  hintAI("Sent ✅ Waiting AI…");
-}
-
-/* ===================== Leaderboard ===================== */
-function renderLeaderboard(rows) {
-  const r = Array.isArray(rows) ? rows : [];
-  if (!el.leaderboard) return;
-
-  el.leaderboard.innerHTML = "";
-
-  if (!r.length) {
-    const node = document.createElement("div");
-    node.className = "item";
-    node.innerHTML = `<div>No ratings yet.</div><div class="badge">—</div>`;
-    el.leaderboard.appendChild(node);
-    return;
-  }
-
-  r.slice(0, 20).forEach((x, idx) => {
-    const node = document.createElement("div");
-    node.className = "item";
-    node.innerHTML = `
-      <div><b>${idx + 1}.</b> ${escapeHtml(x.name)}</div>
-      <div class="badge">⭐ ${escapeHtml(x.avg)} (${escapeHtml(x.count)})</div>
-    `;
-    el.leaderboard.appendChild(node);
-  });
-}
-
-/* ===================== Wiring events ===================== */
-function wireUi() {
-  // register
-  el.btnJoin?.addEventListener("click", () => register((el.nameInput?.value || "").trim()));
-  el.nameInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") el.btnJoin?.click(); });
-
-  el.btnLogout?.addEventListener("click", () => {
+  /* ── Logout ───────────────────────────────────────── */
+  $("btnLogout")?.addEventListener("click", () => {
     localStorage.removeItem(LS_NAME);
     location.reload();
   });
 
-  // tabs
-  el.navHome?.addEventListener("click", () => setTab("home"));
-  el.navLb?.addEventListener("click", () => setTab("lb"));
-  el.navAi?.addEventListener("click", () => setTab("ai"));
+  /* ── Bottom nav ───────────────────────────────────── */
+  $("navHome")?.addEventListener("click", () => setTab("home"));
+  $("navConv")?.addEventListener("click", () => setTab("conv"));
+  $("navAi")?.addEventListener("click",   () => setTab("ai"));
 
-  // leaderboard refresh (we reuse admin snapshot, ok)
-  el.btnLb?.addEventListener("click", () => socket.emit("admin:get"));
-
-  // conversation match buttons
-  el.btnFind?.addEventListener("click", () => matchStart());
-  el.btnStop?.addEventListener("click", () => matchStop());
-
-  // human send
-  el.btnSend?.addEventListener("click", sendHumanMsg);
-  el.msgInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") sendHumanMsg(); });
-
-  // leave/report
-  el.btnLeave?.addEventListener("click", () => {
-    if (!state.current.roomId && !state.ai.roomId) return;
-    socket.emit("room:leave");
+  /* ── Home tab ─────────────────────────────────────── */
+  $("btnResetStats")?.addEventListener("click", () => {
+    S.prac = { sessions: 0, minutes: 0, days: {} };
+    savePrac(); renderStats(); renderCal();
   });
 
-  el.btnReport?.addEventListener("click", () => reportPartner());
-
-  // rating
-  el.rateBtns?.forEach((b) => {
-    b.addEventListener("click", () => ratePartner(b.dataset.rate));
+  $("calPrev")?.addEventListener("click", () => {
+    S.cal.m--;
+    if (S.cal.m < 0) { S.cal.m = 11; S.cal.y--; }
+    renderCal();
   });
 
-  // ice nav
-  el.qPrev?.addEventListener("click", () => iceNav("prev"));
-  el.qNext?.addEventListener("click", () => iceNav("next"));
-
-  // human voice toggle
-  el.btnVoice?.addEventListener("click", async () => {
-    if (!state.current.roomId) { hintHuman("Join a room first."); return; }
-    await warmupAudioOnce();
-    if (!state.voiceOn) await startVoice();
-    else await stopVoice();
+  $("calNext")?.addEventListener("click", () => {
+    S.cal.m++;
+    if (S.cal.m > 11) { S.cal.m = 0; S.cal.y++; }
+    renderCal();
   });
 
-  // AI start
-  el.btnStartAi?.addEventListener("click", () => {
+  $("btnLb")?.addEventListener("click", () => socket.emit("admin:get"));
+
+  /* ── Conv: Start Conversation button ─────────────── */
+  $("btnStartConv")?.addEventListener("click", () => convState("prefs"));
+
+  /* ── Conv: Back ───────────────────────────────────── */
+  $("btnBackIdle")?.addEventListener("click", () => convState("idle"));
+
+  /* ── Conv: Gender chips ───────────────────────────── */
+  $("genderChips")?.addEventListener("click", e => {
+    const btn = e.target.closest(".chip");
+    if (!btn) return;
+    S.prefs.gender = btn.dataset.val;
+    syncChips("genderChips", S.prefs.gender);
+  });
+
+  /* ── Conv: Level chips ────────────────────────────── */
+  $("levelChips")?.addEventListener("click", e => {
+    const btn = e.target.closest(".chip");
+    if (!btn) return;
+    S.prefs.level = btn.dataset.val;
+    syncChips("levelChips", S.prefs.level);
+  });
+
+  /* ── Conv: Find match ─────────────────────────────── */
+  $("btnFind")?.addEventListener("click", () => {
+    /* AI selected → go straight to AI tab */
+    if (S.prefs.gender === "AI") {
+      socket.emit("match:start", { gender: "AI", level: "Any" });
+      hintAi("Connecting to AI Coach…");
+      setTab("ai");
+      return;
+    }
+    hintSearch("Searching for a partner…");
+    socket.emit("match:start", { gender: S.prefs.gender, level: S.prefs.level });
+  });
+
+  $("btnStop")?.addEventListener("click", () => {
+    socket.emit("match:stop");
+    hintSearch("");
+  });
+
+  /* ── Conv: Leave room ─────────────────────────────── */
+  $("btnLeave")?.addEventListener("click", () => {
+    if (S.room.id || S.ai.id) socket.emit("room:leave");
+  });
+
+  /* ── Conv: Report partner ─────────────────────────── */
+  $("btnReport")?.addEventListener("click", () => {
+    if (!S.room.id) return;
+    socket.emit("report:partner", { roomId: S.room.id });
+  });
+
+  /* ── Conv: Human send ─────────────────────────────── */
+  $("btnSend")?.addEventListener("click", sendHuman);
+  $("msgInput")?.addEventListener("keydown", e => { if (e.key === "Enter") sendHuman(); });
+
+  /* ── Conv: Rating stars ───────────────────────────── */
+  document.querySelectorAll(".rate-star").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (!S.room.id) return;
+      const stars = clamp(Number(btn.dataset.r), 1, 5);
+      document.querySelectorAll(".rate-star")
+        .forEach(b => b.classList.toggle("picked", Number(b.dataset.r) === stars));
+      socket.emit("rate:partner", { roomId: S.room.id, stars });
+    });
+  });
+
+  /* ── Conv: Icebreaker navigation ──────────────────── */
+  $("qPrev")?.addEventListener("click", () => {
+    if (S.room.id) socket.emit("icebreaker:nav", { roomId: S.room.id, dir: "prev" });
+  });
+  $("qNext")?.addEventListener("click", () => {
+    if (S.room.id) socket.emit("icebreaker:nav", { roomId: S.room.id, dir: "next" });
+  });
+
+  /* ── Conv: Voice On/Off ───────────────────────────── */
+  $("btnVoice")?.addEventListener("click", async () => {
+    if (!S.room.id) { hintVoice("Join a room first."); return; }
+    await warmAudio();
+    if (!S.voiceOn) await startVoice();
+    else            await stopVoice();
+  });
+
+  /* ── AI tab: Start AI ─────────────────────────────── */
+  $("btnAiStart")?.addEventListener("click", () => {
+    if (S.ai.id) {
+      hintAi("AI session already active.");
+      return;
+    }
     socket.emit("match:start", { gender: "AI", level: "Any" });
-    hintAI("Connecting AI…");
-    setTab("ai");
+    hintAi("Connecting to AI Coach…");
   });
 
-  // AI typed
-  el.btnAiSend?.addEventListener("click", sendAiText);
-  el.aiInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") sendAiText(); });
-
-  // AI voice toggle
-  el.btnAiVoice?.addEventListener("click", async () => {
-    if (!state.ai.roomId) { hintAI("Start AI first."); return; }
-    if (!state.aiMode.listening) aiStartListening();
-    else await aiStopListeningAndSend();
+  /* ── AI tab: Voice On/Off ─────────────────────────── */
+  $("btnAiVoice")?.addEventListener("click", async () => {
+    if (!S.ai.id) { hintAi("Press <strong>Start AI</strong> first."); return; }
+    if (!S.aiListening) startAiMic();
+    else                await stopAiMicAndSend();
     setAiVoiceBtn();
   });
 
-  // AI finish
-  el.btnAiLeave?.addEventListener("click", () => {
-    if (!state.ai.roomId) return;
-    if (state.aiMode.listening) stopAiListeningOnly();
+  /* ── AI tab: Finish session ───────────────────────── */
+  $("btnAiLeave")?.addEventListener("click", () => {
+    if (!S.ai.id) { resetAi(); return; }
+    stopAiMic();
     socket.emit("room:leave");
   });
 
-  // calendar
-  el.calPrev?.addEventListener("click", () => {
-    state.cal.viewMonth--;
-    if (state.cal.viewMonth < 0) { state.cal.viewMonth = 11; state.cal.viewYear--; }
-    renderCalendar();
-  });
-
-  el.calNext?.addEventListener("click", () => {
-    state.cal.viewMonth++;
-    if (state.cal.viewMonth > 11) { state.cal.viewMonth = 0; state.cal.viewYear++; }
-    renderCalendar();
-  });
+  /* ── AI tab: Typed message ────────────────────────── */
+  $("btnAiSend")?.addEventListener("click", sendAi);
+  $("aiInput")?.addEventListener("keydown", e => { if (e.key === "Enter") sendAi(); });
 }
 
-/* ===================== Socket events ===================== */
+/* ─────────────────────────────────────────────────────────
+   WIRE: SOCKET EVENTS
+───────────────────────────────────────────────────────── */
 function wireSocket() {
+
+  /* ── Questions from server ────────────────────────── */
   socket.on("global:questions", ({ questions }) => {
-    state.QUESTIONS = Array.isArray(questions) ? questions.slice(0, 10) : [];
-    while (state.QUESTIONS.length < 10) state.QUESTIONS.push("Tell me something interesting about you.");
-    renderQuestion();
+    S.questions = Array.isArray(questions) ? questions.slice(0, 10) : [];
+    while (S.questions.length < 10) S.questions.push("Tell me something interesting about you.");
+    renderQ();
   });
 
+  /* ── Live stats ───────────────────────────────────── */
   socket.on("global:stats", ({ online, waiting, rooms }) => {
-    if (el.statOnline) el.statOnline.textContent = String(online ?? 0);
-    if (el.statWaiting) el.statWaiting.textContent = String(waiting ?? 0);
-    if (el.statRooms) el.statRooms.textContent = String(rooms ?? 0);
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? 0); };
+    set("statOnline",  online);
+    set("statWaiting", waiting);
+    set("statRooms",   rooms);
+
+    /* Also update online count in Conversation tab */
+    const oc = $("onlineCount");
+    if (oc) oc.textContent = String(online ?? 0);
   });
 
+  /* ── Admin snapshot (leaderboard + optional user list) */
+  socket.on("admin:snapshot", snap => {
+    if (snap?.leaderboard)  renderLb(snap.leaderboard);
+    if (Array.isArray(snap?.onlineUsers)) renderOnline(snap.onlineUsers);
+  });
+
+  /* ── Register success ─────────────────────────────── */
   socket.on("user:register:ok", ({ user, aiScore }) => {
-    state.me.name = user.name;
-    localStorage.setItem(LS_NAME, state.me.name);
+    S.name = user.name;
+    localStorage.setItem(LS_NAME, user.name);
 
-    if (el.meName) el.meName.textContent = state.me.name;
+    const mn = $("meName"); if (mn) mn.textContent = user.name;
+    if (aiScore) renderScore(aiScore);
 
-    show(el.screenName, false);
-    show(el.screenMain, true);
-    show(el.bannedScreen, false);
+    showScreen("main");
+    resetConv();
+    resetAi();
+    renderStats();
+    renderCal();
+    syncChips("genderChips", S.prefs.gender);
+    syncChips("levelChips",  S.prefs.level);
 
-    if (aiScore) updateScore(aiScore);
-
-    setTab("home");
-
-    resetHumanUI();
-    resetAIUI();
-
-    renderHomeStats();
-    renderCalendar();
-
-    setChipGroup(el.chipsGender, "gender");
-    setChipGroup(el.chipsLevel, "level");
+    /* Always open on Conversation tab */
+    setTab("conv");
+    convState("idle");
   });
 
+  /* ── Register fail ────────────────────────────────── */
   socket.on("user:register:fail", ({ reason }) => {
-    if (reason === "banned") {
-      show(el.screenName, false);
-      show(el.screenMain, false);
-      show(el.bannedScreen, true);
-      return;
+    if (reason === "banned") { showScreen("banned"); return; }
+
+    const ne = $("nameErr");
+    if (!ne) return;
+
+    if (reason === "name_taken") {
+      ne.textContent = "This name is already in use by someone else. Choose a different name.";
+    } else {
+      ne.textContent = "Invalid name. Please try something else.";
     }
-    if (el.nameErr) el.nameErr.textContent = "Invalid name";
   });
 
+  /* ── Kicked (same name logged in elsewhere) ───────── */
   socket.on("user:kicked", () => {
     localStorage.removeItem(LS_NAME);
     location.reload();
   });
 
-  socket.on("match:searching", () => {
-    if (el.searchInfo) el.searchInfo.textContent = "Searching…";
-  });
+  /* ── Banned mid-session ───────────────────────────── */
+  socket.on("user:banned", () => showScreen("banned"));
 
-  // match found
+  /* ── Searching ────────────────────────────────────── */
+  socket.on("match:searching", () => hintSearch("Searching for a partner…"));
+
+  /* ── Match found ──────────────────────────────────── */
   socket.on("match:found", async ({ roomId, partnerName, aiScore }) => {
-    if (aiScore) updateScore(aiScore);
+    if (aiScore) renderScore(aiScore);
 
-    // AI room
+    /* ── AI room ─────────────────────────────────── */
     if (partnerName === "AI") {
-      state.ai.roomId = roomId;
-      state.ai.startedAt = Date.now();
+      S.ai.id = roomId;
+      sessionStart("ai");
 
-      if (el.aiMessages) el.aiMessages.innerHTML = "";
-      if (el.aiReportCard) el.aiReportCard.style.display = "none";
+      const am = $("aiMessages"); if (am) am.innerHTML = "";
+      const ar = $("aiReport");   if (ar) ar.style.display = "none";
 
-      hintAI("AI ready ✅ Voice On → speak → Voice Off. AI replies by voice.");
+      addMsg("aiMessages", "System", "Connected to AI Coach. Ask anything or use voice.", "sys");
+      hintAi("AI ready ✅  Voice On → speak → Voice Off → AI replies by voice.");
       setAiVoiceBtn();
       setTab("ai");
-      appendMsg(el.aiMessages, "System", "Connected to AI.");
-
-      sessionStart("ai");
       return;
     }
 
-    // Human room
-    state.current.roomId = roomId;
-    state.current.partner = partnerName;
-    state.current.connectedAt = Date.now();
-    state.current.polite = (state.me.name || "").localeCompare(partnerName || "") < 0;
-
-    if (el.partnerName) el.partnerName.textContent = partnerName;
-
-    if (el.searchInfo) el.searchInfo.textContent = "";
-    if (el.messages) el.messages.innerHTML = "";
-
-    show(el.prefsPanel, false);
-    show(el.chatPanel, true);
-
-    hintHuman("Both users press Voice On for calls.");
-    appendMsg(el.messages, "System", "Connected.");
-
-    await warmupAudioOnce();
-
+    /* ── Human room ──────────────────────────────── */
+    S.room.id     = roomId;
+    S.room.partner= partnerName;
+    S.room.polite = (S.name || "").localeCompare(partnerName || "") < 0;
     sessionStart("human");
+
+    const pn = $("partnerName"); if (pn) pn.textContent  = partnerName;
+    const pa = $("pAvatar");     if (pa) pa.textContent   = (partnerName || "?")[0].toUpperCase();
+    const msgs = $("messages");  if (msgs) msgs.innerHTML = "";
+
+    hintSearch("");
+    convState("chat");
+    setTab("conv");
+
+    addMsg("messages", "System", `Connected with ${partnerName}. Say hello!`, "sys");
+    hintVoice("Press Voice On to speak. Your partner will hear you immediately.");
+
+    /* Pre-build peer NOW → ready to receive their audio one-way */
+    if (!S.pc) buildPeer();
+    await warmAudio();
   });
 
+  /* ── Icebreaker index change ──────────────────────── */
   socket.on("icebreaker:set", ({ index }) => {
-    state.qIdx = Number(index) || 0;
-    renderQuestion();
+    S.qIdx = Number(index) || 0;
+    renderQ();
   });
 
-  // chat messages:
-  socket.on("chat:message", async (m) => {
-    if (!m || !m.from) return;
+  /* ── Chat message ─────────────────────────────────── */
+  socket.on("chat:message", async msg => {
+    if (!msg?.from) return;
 
-    // AI messages go to AI panel (and TTS)
-    if (state.ai.roomId && m.from === "AI") {
-      appendMsg(el.aiMessages, "AI", m.text);
-      markPracticeNow(0, 0);
-      await aiSpeak(m.text);
+    /* AI room message */
+    if (S.ai.id && msg.from === "AI") {
+      addMsg("aiMessages", "AI Coach", msg.text);
+      await aiSpeak(msg.text);
       return;
     }
 
-    // Human messages go to human panel only
-    if (state.current.roomId && state.current.partner && m.from !== "AI") {
-      appendMsg(el.messages, m.from, m.text);
-      markPracticeNow(0, 0);
+    /* Human room message */
+    if (S.room.id && msg.from !== "AI") {
+      const isMe = msg.from === S.name;
+      addMsg("messages", msg.from, msg.text, isMe ? "me" : "");
     }
   });
 
-  socket.on("report:ok", ({ reported }) => {
-    appendMsg(el.messages, "System", "Reported: " + (reported || "ok"));
-  });
+  /* ── Report / Rate acknowledgments ───────────────── */
+  socket.on("report:ok", ({ reported }) =>
+    addMsg("messages", "System", `Reported: ${reported || "ok"}`, "sys"));
 
-  socket.on("rate:ok", ({ rated }) => {
-    appendMsg(el.messages, "System", "Rated: " + (rated || "ok"));
-  });
+  socket.on("rate:ok", ({ rated }) =>
+    addMsg("messages", "System", `Rated: ${rated || "ok"}`, "sys"));
 
+  /* ── Room ended ───────────────────────────────────── */
   socket.on("room:ended", ({ reason }) => {
-    // ADDED: session finish by time
-    if (state.current.roomId) {
-      sessionFinish("human");
-      appendMsg(el.messages, "System", "Disconnected.");
-      resetHumanUI();
+    if (S.room.id) {
+      sessionEnd("human");
+      addMsg("messages", "System", `Conversation ended${reason ? " (" + reason + ")" : ""}.`, "sys");
+      setTimeout(() => resetConv(), 1800);
     }
-    if (state.ai.roomId) {
-      sessionFinish("ai");
-      appendMsg(el.aiMessages, "System", "AI session ended.");
-      state.ai.roomId = null;
-      stopAiListeningOnly();
+    if (S.ai.id) {
+      sessionEnd("ai");
+      addMsg("aiMessages", "System", "AI session ended.", "sys");
+      S.ai.id = null;
+      stopAiMic();
       setAiVoiceBtn();
+      hintAi("Session ended. Press <strong>Start AI</strong> to begin a new session.");
     }
-    hintHuman(reason ? `Room ended: ${reason}` : "");
   });
 
+  /* ── AI Coach report ──────────────────────────────── */
   socket.on("coach:report", ({ report, aiScore }) => {
-    if (aiScore) updateScore(aiScore);
+    if (aiScore) renderScore(aiScore);
 
-    if (el.aiReportCard) el.aiReportCard.style.display = "";
-    if (el.aiReportSummary) el.aiReportSummary.textContent = report?.summary || "Report received.";
+    /* Show report card */
+    const rc = $("aiReport"); if (rc) rc.style.display = "block";
 
-    if (el.aiReportList) {
-      el.aiReportList.innerHTML = "";
+    /* Summary */
+    const rs = $("rSummary"); if (rs) rs.textContent = report?.summary || "Report received.";
 
-      const fixes = Array.isArray(report?.fixes) ? report.fixes : [];
-      const steps = Array.isArray(report?.next_steps) ? report.next_steps : [];
+    /* Scores */
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? "—"); };
+    set("rBand", report?.band);
+    set("rFlu",  report?.fluency);
+    set("rGra",  report?.grammar);
+    set("rVoc",  report?.vocab);
+    set("rPro",  report?.pronunciation);
 
-      const node1 = document.createElement("div");
-      node1.className = "item";
-      node1.innerHTML = `<div><b>Band:</b> ${escapeHtml(report?.band)}</div><div class="badge">AI Score</div>`;
-      el.aiReportList.appendChild(node1);
-
-      const node2 = document.createElement("div");
-      node2.className = "item";
-      node2.innerHTML = `<div><b>Breakdown:</b> F ${escapeHtml(report?.fluency)} • G ${escapeHtml(report?.grammar)} • V ${escapeHtml(report?.vocab)} • P ${escapeHtml(report?.pronunciation)}</div><div class="badge">Details</div>`;
-      el.aiReportList.appendChild(node2);
-
-      if (fixes.length) {
-        const box = document.createElement("div");
-        box.className = "item";
-        box.innerHTML = `<div><b>Fixes:</b><br>${fixes.map(x => "• " + escapeHtml(x)).join("<br>")}</div><div class="badge">Grammar</div>`;
-        el.aiReportList.appendChild(box);
-      }
-
-      if (steps.length) {
-        const box = document.createElement("div");
-        box.className = "item";
-        box.innerHTML = `<div><b>Next steps:</b><br>${steps.map(x => "• " + escapeHtml(x)).join("<br>")}</div><div class="badge">Plan</div>`;
-        el.aiReportList.appendChild(box);
-      }
+    /* Fixes */
+    const fl = $("rFixes");
+    if (fl) {
+      fl.innerHTML = "";
+      (Array.isArray(report?.fixes) ? report.fixes : []).forEach(x => {
+        const li = document.createElement("li");
+        li.textContent = x;
+        fl.appendChild(li);
+      });
     }
 
-    // AI session ended
-    sessionFinish("ai");
-    state.ai.roomId = null;
-    stopAiListeningOnly();
+    /* Next steps */
+    const sl = $("rSteps");
+    if (sl) {
+      sl.innerHTML = "";
+      (Array.isArray(report?.next_steps) ? report.next_steps : []).forEach(x => {
+        const li = document.createElement("li");
+        li.textContent = x;
+        sl.appendChild(li);
+      });
+    }
+
+    sessionEnd("ai");
+    S.ai.id = null;
+    stopAiMic();
     setAiVoiceBtn();
-    hintAI("Session finished ✅ Your report is below.");
+    hintAi("✅ Session finished! Your report is below.");
+
+    /* Scroll to report */
+    const ar = $("aiReport");
+    if (ar) setTimeout(() => ar.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
   });
 
-  // admin snapshot -> leaderboard
-  socket.on("admin:snapshot", (snap) => {
-    if (snap?.leaderboard) renderLeaderboard(snap.leaderboard);
-  });
-
-  // WebRTC signaling
-  socket.on("webrtc:offer", async ({ sdp, from }) => {
-    if (!state.current.roomId) return;
-
-    // if user hasn't pressed Voice On, they don't have pc/stream yet
-    if (!state.pc || !state.localStream) {
-      hintHuman(`${from || "Partner"} started voice. Press Voice On to join.`);
-      return;
-    }
-
-    const offerCollision = state.makingOffer || state.pc.signalingState !== "stable";
-    state.ignoreOffer = !state.current.polite && offerCollision;
-    if (state.ignoreOffer) return;
-
-    try {
-      await state.pc.setRemoteDescription(new RTCSessionDescription(sdp));
-      if (sdp.type === "offer") {
-        const answer = await state.pc.createAnswer();
-        await state.pc.setLocalDescription(answer);
-        socket.emit("webrtc:answer", { roomId: state.current.roomId, sdp: state.pc.localDescription });
-      }
-    } catch {
-      hintHuman("Offer handling error.");
-    }
-  });
+  /* ── WebRTC signaling ─────────────────────────────── */
+  socket.on("webrtc:offer", async ({ sdp, from }) => handleOffer(sdp, from));
 
   socket.on("webrtc:answer", async ({ sdp }) => {
-    if (!state.pc) return;
-    try {
-      await state.pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    } catch {
-      hintHuman("Answer handling error.");
-    }
+    if (!S.pc) return;
+    try { await S.pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch (_) {}
   });
 
   socket.on("webrtc:ice", async ({ candidate }) => {
-    if (!state.pc) return;
-    try {
-      await state.pc.addIceCandidate(candidate);
-    } catch {
-      // ignore
-    }
+    if (!S.pc) return;
+    try { await S.pc.addIceCandidate(candidate); } catch (_) {}
   });
 
-  // ADDED: socket connection UX
-  socket.on("connect", () => {
-    setNetBadge("");
-  });
-
+  /* ── Connection status ────────────────────────────── */
+  socket.on("connect",    () => netBadge(""));
   socket.on("disconnect", () => {
-    setNetBadge("Offline… reconnecting");
-    // AI micni backgroundda qoldirmaymiz
-    if (state.aiMode.listening) stopAiListeningOnly();
+    netBadge("Offline… reconnecting");
+    if (S.aiListening) stopAiMic();
   });
-
-  socket.io?.on?.("reconnect_attempt", () => {
-    setNetBadge("Reconnecting…");
-  });
-
-  socket.io?.on?.("reconnect", () => {
-    setNetBadge("");
-  });
+  socket.io?.on?.("reconnect_attempt", () => netBadge("Reconnecting…"));
+  socket.io?.on?.("reconnect",         () => netBadge(""));
 }
 
-/* ===================== Boot ===================== */
-(async function boot() {
-  // base data
-  loadPractice();
-  await loadRtcConfig();
+/* ─────────────────────────────────────────────────────────
+   GLOBAL EVENTS
+───────────────────────────────────────────────────────── */
 
-  // wire UI + socket
-  wireUi();
-  wireChips();
+/* Escape → stop AI mic */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && S.aiListening) stopAiMic();
+});
+
+/* Tab hidden → stop AI mic */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && S.aiListening) {
+    stopAiMic();
+    hintAi("Mic stopped (tab hidden).");
+  }
+});
+
+/* Browser online/offline */
+window.addEventListener("offline", () => netBadge("Offline"));
+window.addEventListener("online",  () => netBadge(""));
+
+/* ─────────────────────────────────────────────────────────
+   BOOT
+───────────────────────────────────────────────────────── */
+(async function boot() {
+
+  /* 1. Load saved practice data */
+  loadPrac();
+
+  /* 2. Fetch RTC config from server */
+  await loadRtcCfg();
+
+  /* 3. Wire all UI + socket events */
+  wireUI();
   wireSocket();
 
-  // calendar render initial
-  renderHomeStats();
-  renderCalendar();
+  /* 4. Render initial local data */
+  renderStats();
+  renderCal();
+  renderQ();
 
-  // questions default
-  renderQuestion();
+  /* 5. Sync chips to default prefs */
+  syncChips("genderChips", S.prefs.gender);
+  syncChips("levelChips",  S.prefs.level);
 
-  // auto login
+  /* 6. Show Name screen, hide rest */
+  showScreen("name");
+  convState("idle");
+
+  /* 7. Auto-login if name was saved */
   const stored = (localStorage.getItem(LS_NAME) || "").trim();
   if (stored) {
-    if (el.nameInput) el.nameInput.value = stored;
-    register(stored);
-  } else {
-    show(el.screenName, true);
-    show(el.screenMain, false);
+    const ni = $("nameInput");
+    if (ni) ni.value = stored;
+    socket.emit("user:register", { name: stored });
   }
 
-  // safe initial hints
-  hintHuman("");
-  hintAI("Press Start AI to begin.");
-
-  // show prefs panel by default (Conversation tab will use it)
-  show(el.prefsPanel, true);
-  show(el.chatPanel, false);
-
-  // default prefs
-  state.prefs.gender = "Any";
-  state.prefs.level = "Any";
-  setChipGroup(el.chipsGender, "gender");
-  setChipGroup(el.chipsLevel, "level");
-
-  // default tab
-  setTab("home");
 })();
-
-/* ============================================================
-   Extra: small UX improvements (optional but senior-feel)
-   ============================================================ */
-
-// prevent accidental enter submitting in empty
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    // quick stop AI listening
-    if (state.aiMode.listening) stopAiListeningOnly();
-  }
-});
-
-// ADDED: visibility change safety
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    if (state.aiMode.listening) {
-      stopAiListeningOnly();
-      hintAI("AI mic stopped (tab hidden).");
-    }
-  }
-});
-
-// ADDED: online/offline badge
-window.addEventListener("offline", () => setNetBadge("Offline"));
-window.addEventListener("online", () => setNetBadge(""));
-
