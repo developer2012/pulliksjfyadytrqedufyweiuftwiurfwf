@@ -256,10 +256,13 @@ app.get("/healthz", (req, res) => {
 
 /* ---------- ICE config ---------- */
 app.get("/webrtc-config", (req, res) => {
-  const iceServers = [{ urls: STUN }];
-  if (TURN_URL && TURN_USER && TURN_PASS) {
-    iceServers.push({ urls: TURN_URL, username: TURN_USER, credential: TURN_PASS });
-  }
+  const iceServers = [
+    { urls: "stun:stun.relay.metered.ca:80" },
+    { urls: "turn:global.relay.metered.ca:80",                    username: TURN_USER, credential: TURN_PASS },
+    { urls: "turn:global.relay.metered.ca:80?transport=tcp",      username: TURN_USER, credential: TURN_PASS },
+    { urls: "turn:global.relay.metered.ca:443",                   username: TURN_USER, credential: TURN_PASS },
+    { urls: "turns:global.relay.metered.ca:443?transport=tcp",    username: TURN_USER, credential: TURN_PASS },
+  ];
   res.json({ iceServers, forceRelay: FORCE_RELAY });
 });
 
