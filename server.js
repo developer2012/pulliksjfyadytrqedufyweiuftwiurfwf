@@ -59,31 +59,29 @@ const PORT = Number(process.env.PORT || 3000);
 const TRUST_PROXY = (process.env.TRUST_PROXY || "1").trim();
 const STATIC_DIR = path.join(__dirname, "public");
 
-// ✅ ENV-only secrets
-const ADMIN_TOKEN = "salom123"; // Must be set in ENV for admin API access
+const ADMIN_TOKEN = "salom123";
 
 // AI provider selection
 const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").trim().toLowerCase();
 
 // Groq (OpenAI-compatible)
-const GROQ_API_KEY = "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"
-const GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-const GROQ_MODEL = "llama-3.3-70b-versatile" // example default (change as needed)
-// xAI Grok (OpenAI-compatible style endpoints on api.x.ai)
+const GROQ_API_KEY = "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";
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+
+// xAI Grok
 const XAI_API_KEY = (process.env.XAI_API_KEY || "").trim();
 const XAI_BASE_URL = (process.env.XAI_BASE_URL || "https://api.x.ai/v1").trim();
-const XAI_MODEL = (process.env.XAI_MODEL || "grok-4-fast-reasoning").trim(); // example default (set your available model)
+const XAI_MODEL = (process.env.XAI_MODEL || "grok-4-fast-reasoning").trim();
 
 // Gemini
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim();
 const GEMINI_BASE = (process.env.GEMINI_BASE || "https://generativelanguage.googleapis.com/v1beta").trim();
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 
-// WebRTC ICE
-const STUN = (process.env.STUN_URL || "stun:stun.l.google.com:19302").trim();
-const TURN_URL = "turn:relay.metered.ca:80"
-const TURN_USER ="b4a729fa2f17923032be306e"
-const TURN_PASS = "E9ZqX0aTVZm9qhcF"
+// WebRTC ICE — hardcoded, to'g'ri URL lar
+const TURN_USER = "b4a729fa2f17923032be306e";
+const TURN_PASS = "E9ZqX0aTVZm9qhcF";
 const FORCE_RELAY = String(process.env.FORCE_RELAY || "").toLowerCase() === "true";
 
 // Limits
@@ -94,9 +92,9 @@ const ROOM_HISTORY_LIMIT = Number(process.env.ROOM_HISTORY_LIMIT || 80);
 const WAITING_LIMIT = Number(process.env.WAITING_LIMIT || 2000);
 
 // Cleanup/TTL
-const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 1000 * 60 * 60);      // 1h
-const WAITING_TTL_MS = Number(process.env.WAITING_TTL_MS || 1000 * 60 * 10); // 10m
-const ROOM_IDLE_END_MS = Number(process.env.ROOM_IDLE_END_MS || 1000 * 60 * 12); // 12m
+const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 1000 * 60 * 60);
+const WAITING_TTL_MS = Number(process.env.WAITING_TTL_MS || 1000 * 60 * 10);
+const ROOM_IDLE_END_MS = Number(process.env.ROOM_IDLE_END_MS || 1000 * 60 * 12);
 
 // Socket token bucket (per 10s)
 const SOCKET_EVENTS_PER_10S = Number(process.env.SOCKET_EVENTS_PER_10S || 140);
@@ -110,13 +108,13 @@ const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 9000);
 const QUESTIONS = [
   "What is your hobby, and why do you enjoy it?",
   "Where do you live, and what do you like about that place?",
-  "What’s a skill you want to learn this year?",
+  "What's a skill you want to learn this year?",
   "Tell me about a memorable day you had recently.",
   "What kind of music do you listen to, and when do you listen to it?",
   "If you could travel anywhere, where would you go and why?",
   "What do you usually do on weekends?",
   "What is your favorite movie or series, and what do you like about it?",
-  "What’s a goal you’re working on right now?",
+  "What's a goal you're working on right now?",
   "What makes a good friend, in your opinion?"
 ];
 
@@ -169,7 +167,6 @@ function textFromOpenAICompatChoice(json) {
   const content = c?.message?.content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    // Some providers return structured content parts
     return content
       .map((p) => (typeof p === "string" ? p : p?.text || ""))
       .filter(Boolean)
@@ -196,7 +193,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(express.json({ limit: JSON_LIMIT }));
 
-/* ---------- Open CORS (domainlarsiz) ---------- */
+/* ---------- Open CORS ---------- */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   res.setHeader("Access-Control-Allow-Origin", origin || "*");
@@ -223,12 +220,12 @@ app.use(express.static(STATIC_DIR, {
 
 /* ===================== In-memory State ===================== */
 const state = {
-  usersBySocket: new Map(), // socketId -> user
-  socketsByName: new Map(), // name -> socketId
+  usersBySocket: new Map(),
+  socketsByName: new Map(),
   bannedNames: new Set(),
 
-  waiting: [],              // { socketId, ts }
-  rooms: new Map(),         // roomId -> room
+  waiting: [],
+  rooms: new Map(),
 
   reportsByName: new Map(),
   ratingsByName: new Map(),
@@ -254,14 +251,15 @@ app.get("/healthz", (req, res) => {
   });
 });
 
-/* ---------- ICE config ---------- */
+/* ---------- ICE config — TO'G'RI TURN URL LAR ---------- */
 app.get("/webrtc-config", (req, res) => {
   const iceServers = [
+    { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun.relay.metered.ca:80" },
-    { urls: "turn:global.relay.metered.ca:80",                    username: TURN_USER, credential: TURN_PASS },
-    { urls: "turn:global.relay.metered.ca:80?transport=tcp",      username: TURN_USER, credential: TURN_PASS },
-    { urls: "turn:global.relay.metered.ca:443",                   username: TURN_USER, credential: TURN_PASS },
-    { urls: "turns:global.relay.metered.ca:443?transport=tcp",    username: TURN_USER, credential: TURN_PASS },
+    { urls: "turn:global.relay.metered.ca:80",                 username: TURN_USER, credential: TURN_PASS },
+    { urls: "turn:global.relay.metered.ca:80?transport=tcp",   username: TURN_USER, credential: TURN_PASS },
+    { urls: "turn:global.relay.metered.ca:443",                username: TURN_USER, credential: TURN_PASS },
+    { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: TURN_USER, credential: TURN_PASS },
   ];
   res.json({ iceServers, forceRelay: FORCE_RELAY });
 });
@@ -271,14 +269,13 @@ app.get("/diag", (req, res) => {
   res.json({
     env: NODE_ENV,
     aiProvider: AI_PROVIDER,
-    stun: STUN,
-    turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
+    turnConfigured: !!(TURN_USER && TURN_PASS),
     forceRelay: FORCE_RELAY,
     aiConfigured: getAiConfigured()
   });
 });
 
-/* ===================== Admin HTTP API (token) ===================== */
+/* ===================== Admin HTTP API ===================== */
 function adminHttpAuth(req, res) {
   const tok = String(req.headers["x-admin-token"] || "").trim();
   if (!ADMIN_TOKEN || tok !== ADMIN_TOKEN) {
@@ -309,7 +306,7 @@ app.get("/admin/stats", (req, res) => {
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: true, methods: ["GET", "POST"] }, // open
+  cors: { origin: true, methods: ["GET", "POST"] },
   transports: ["websocket", "polling"],
   pingTimeout: 20000,
   pingInterval: 25000,
@@ -605,10 +602,8 @@ async function aiJSON({ system, user, maxOutputTokens = 420, temperature = 0.35,
   const raw = await aiText({ system, user, maxOutputTokens, temperature, timeoutMs });
   const t = String(raw || "").trim();
 
-  // Try direct JSON parse
   try { return JSON.parse(t); } catch {}
 
-  // Try extracting JSON object
   const first = t.indexOf("{");
   const last = t.lastIndexOf("}");
   if (first >= 0 && last > first) {
@@ -674,7 +669,6 @@ io.on("connection", (socket) => {
     if (!n) return socket.emit("user:register:fail", { reason: "bad_name" });
     if (state.bannedNames.has(n)) return socket.emit("user:register:fail", { reason: "banned" });
 
-    // Kick same-name old session
     const oldId = state.socketsByName.get(n);
     if (oldId && oldId !== socket.id) {
       const oldSock = io.sockets.sockets.get(oldId);
@@ -684,7 +678,6 @@ io.on("connection", (socket) => {
       }
     }
 
-    // Rename flow
     const existing = state.usersBySocket.get(socket.id);
     if (existing) {
       if (existing.roomId) endRoom(existing.roomId, "rename");
@@ -740,7 +733,6 @@ io.on("connection", (socket) => {
     u.level = safeStr(level, 16) || "Any";
     u.searching = true;
 
-    // AI match if user selects AI
     if (u.gender === "AI") {
       const roomId = makeRoomId(socket.id, "AI");
       state.rooms.set(roomId, {
@@ -767,7 +759,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Human match
     cleanupWaiting();
 
     let foundIndex = -1;
@@ -879,7 +870,6 @@ io.on("connection", (socket) => {
     room.history.push(msg);
     if (room.history.length > ROOM_HISTORY_LIMIT) room.history.shift();
 
-    // AI room
     if (room.ai) {
       socket.emit("chat:message", msg);
 
@@ -922,13 +912,12 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Human room
     io.to(roomId).emit("chat:message", msg);
     emitGlobalStats();
     emitAdminSnapshot();
   });
 
-  /* ---------- Leave room (AI report on exit) ---------- */
+  /* ---------- Leave room ---------- */
   socket.on("room:leave", async () => {
     if (!bucketTake(socket.id, "event", 2)) return;
 
@@ -984,7 +973,7 @@ io.on("connection", (socket) => {
     leaveRoom(socket.id, "left");
   });
 
-  /* ---------- Report / Rate (human only) ---------- */
+  /* ---------- Report / Rate ---------- */
   socket.on("report:partner", ({ roomId } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
@@ -1024,7 +1013,7 @@ io.on("connection", (socket) => {
     emitAdminSnapshot();
   });
 
-  /* ---------- WebRTC signaling (human only) ---------- */
+  /* ---------- WebRTC signaling ---------- */
   socket.on("webrtc:offer", ({ roomId, sdp } = {}) => {
     const bytes = Buffer.byteLength(JSON.stringify({ roomId: roomId ?? "", sdp: sdp ? "[sdp]" : "" }));
     if (!bucketTake(socket.id, "event", bytes)) return;
@@ -1076,7 +1065,7 @@ io.on("connection", (socket) => {
     io.to(otherId).emit("webrtc:ice", { candidate, from: u.name });
   });
 
-  /* ---------- Admin Socket Events (token protected) ---------- */
+  /* ---------- Admin Socket Events ---------- */
   function adminAuth(payload) {
     const tok = String(payload?.token || "").trim();
     return ADMIN_TOKEN && tok && tok === ADMIN_TOKEN;
@@ -1132,14 +1121,12 @@ server.listen(PORT, "0.0.0.0", () => {
     port: PORT,
     env: NODE_ENV,
     aiProvider: AI_PROVIDER,
-    stun: STUN,
-    turnConfigured: !!(TURN_URL && TURN_USER && TURN_PASS),
+    turnConfigured: !!(TURN_USER && TURN_PASS),
     forceRelay: FORCE_RELAY,
     aiConfigured: getAiConfigured()
   });
 
   if (!ADMIN_TOKEN) warn("ADMIN_TOKEN is missing — admin actions disabled.");
-
   if (AI_PROVIDER === "groq" && !GROQ_API_KEY) warn("GROQ_API_KEY missing — AI replies will show config warning.");
   if (AI_PROVIDER === "xai" && !XAI_API_KEY) warn("XAI_API_KEY missing — AI replies will show config warning.");
   if (AI_PROVIDER === "gemini" && !GEMINI_API_KEY) warn("GEMINI_API_KEY missing — AI replies will show config warning.");
