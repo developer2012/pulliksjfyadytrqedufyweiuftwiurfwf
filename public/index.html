@@ -12,10 +12,1051 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
-  <link rel="stylesheet" href="/public/style.css"/>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' rx='16' fill='%232563EB'/%3E%3Ctext x='32' y='46' text-anchor='middle' font-size='38' font-weight='900' fill='white' font-family='Arial'%3EW%3C/text%3E%3C/svg%3E"/>
 </head>
 <body>
+<style>
+  /* ============================================================
+   WonderTalk — style.css
+   Dark glass · Syne + DM Sans · All IDs match index.html
+   ============================================================ */
+
+/* ── Reset ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+/* ── Design tokens ─────────────────────────────────── */
+:root {
+  --f-head : 'Syne', 'Arial Black', sans-serif;
+  --f-body : 'DM Sans', 'Segoe UI', Arial, sans-serif;
+
+  /* surfaces */
+  --bg : #060C1A;
+  --s0 : rgba(255,255,255,.03);
+  --s1 : rgba(255,255,255,.055);
+  --s2 : rgba(255,255,255,.09);
+
+  /* borders */
+  --b0 : rgba(255,255,255,.07);
+  --b1 : rgba(255,255,255,.11);
+  --b2 : rgba(255,255,255,.19);
+
+  /* text */
+  --tx : rgba(255,255,255,.92);
+  --mut : rgba(255,255,255,.52);
+  --dim : rgba(255,255,255,.32);
+
+  /* palette */
+  --blue : #2563EB;
+  --blue2 : #3b82f6;
+  --violet : #7C3AED;
+  --green : #22C55E;
+  --red : #EF4444;
+  --amber : #F59E0B;
+
+  /* radii */
+  --r1:10px; --r2:14px; --r3:18px; --r4:22px; --r5:28px;
+
+  /* misc */
+  --blur : blur(20px);
+  --sh : 0 16px 40px rgba(0,0,0,.38);
+  --sh2 : 0 24px 56px rgba(0,0,0,.46);
+  --shb : 0 10px 28px rgba(37,99,235,.24);
+  --max : 1060px;
+}
+
+/* ── Base ──────────────────────────────────────────── */
+body {
+  font-family : var(--f-body);
+  background : var(--bg);
+  color : var(--tx);
+  line-height : 1.5;
+  overflow-x : hidden;
+  -webkit-font-smoothing : antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Background layers ─────────────────────────────── */
+.bg-glow {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(ellipse 900px 650px at 8% 18%, rgba(37, 99,235,.15) 0%, transparent 60%),
+    radial-gradient(ellipse 780px 560px at 92% 28%, rgba(124,58,237,.13) 0%, transparent 60%),
+    radial-gradient(ellipse 660px 740px at 50% 90%, rgba(20,160,255,.09) 0%, transparent 60%),
+    var(--bg);
+}
+.bg-grid {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  opacity:.022;
+  background-image:
+    linear-gradient(rgba(255,255,255,1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px);
+  background-size: 52px 52px;
+}
+
+/* ── Shell ─────────────────────────────────────────── */
+.shell {
+  position : relative; z-index: 1;
+  max-width : var(--max);
+  margin : 0 auto;
+  padding : 18px 16px 108px;
+}
+
+/* ── Card ──────────────────────────────────────────── */
+.card {
+  border-radius : var(--r4);
+  border : 1px solid var(--b0);
+  background : var(--s1);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow : var(--sh);
+  padding : 20px;
+  margin-bottom : 14px;
+}
+.card-title {
+  font-family : var(--f-head);
+  font-weight : 800;
+  font-size : 15.5px;
+  letter-spacing: -.2px;
+  color : var(--tx);
+}
+.card-sub {
+  font-size : 12.5px;
+  color : var(--mut);
+  margin-top : 4px;
+  line-height: 1.5;
+}
+
+/* ── Typography helpers ────────────────────────────── */
+.muted-text {
+  font-size : 12.5px;
+  color : var(--dim);
+  line-height: 1.5;
+}
+.err-text {
+  font-size : 12.5px;
+  color : #f87171;
+  margin-top : 9px;
+  min-height : 18px;
+  line-height: 1.4;
+}
+.field-lbl {
+  display : block;
+  font-size : 11px;
+  font-weight : 700;
+  text-transform: uppercase;
+  letter-spacing:.09em;
+  color : var(--dim);
+  margin-bottom : 8px;
+}
+.pref-section-lbl {
+  display : block;
+  font-size : 11px;
+  font-weight : 700;
+  text-transform: uppercase;
+  letter-spacing:.09em;
+  color : var(--dim);
+  margin-bottom : 10px;
+}
+
+/* ── Layout helpers ────────────────────────────────── */
+.row-between {
+  display : flex;
+  align-items : center;
+  justify-content: space-between;
+  gap : 10px;
+  flex-wrap : wrap;
+}
+.row-gap {
+  display : flex;
+  align-items: center;
+  gap : 9px;
+  flex-wrap : wrap;
+}
+
+/* ── Input ─────────────────────────────────────────── */
+.inp {
+  width : 100%;
+  padding : 13px 15px;
+  border-radius: var(--r2);
+  border : 1px solid var(--b1);
+  background : rgba(6,12,26,.55);
+  color : var(--tx);
+  font-family: var(--f-body);
+  font-size : 14.5px;
+  outline : none;
+  transition : border-color.18s, box-shadow.18s;
+}
+.inp::placeholder { color: rgba(255,255,255,.28); }
+.inp:focus {
+  border-color: rgba(37,99,235,.6);
+  box-shadow : 0 0 0 4px rgba(37,99,235,.13);
+}
+
+/* ── Buttons ───────────────────────────────────────── */
+.btn {
+  display : inline-flex;
+  align-items : center;
+  justify-content: center;
+  gap : 7px;
+  padding : 11px 16px;
+  border-radius : var(--r2);
+  border : 1px solid var(--b1);
+  background : var(--s1);
+  color : rgba(255,255,255,.88);
+  font-family : var(--f-body);
+  font-size : 13.5px;
+  font-weight : 600;
+  cursor : pointer;
+  white-space : nowrap;
+  user-select : none;
+  line-height : 1;
+  transition : background.15s, border-color.15s, transform.12s, box-shadow.15s;
+}
+.btn:hover { background: var(--s2); border-color: var(--b2); transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn:disabled{ opacity:.38; cursor: not-allowed; transform: none!important; }
+
+.btn-primary {
+  background : linear-gradient(135deg, var(--blue) 0%, var(--blue2) 100%);
+  border-color: rgba(37,99,235,.45);
+  color : #fff;
+  box-shadow : var(--shb);
+}
+.btn-primary:hover {
+  box-shadow : 0 16px 40px rgba(37,99,235,.34);
+  border-color: rgba(37,99,235,.65);
+}
+
+.btn-ghost {
+  background : transparent;
+  border-color: transparent;
+}
+.btn-ghost:hover {
+  background : var(--s1);
+  border-color: var(--b1);
+}
+
+.btn-danger {
+  background : rgba(239,68,68,.10);
+  border-color: rgba(239,68,68,.28);
+  color : #f87171;
+}
+.btn-danger:hover {
+  background : rgba(239,68,68,.18);
+  border-color: rgba(239,68,68,.48);
+}
+
+.btn-sm { padding: 8px 12px; font-size: 12.5px; border-radius: var(--r1); }
+.btn-xl { padding: 14px 26px; font-size: 15px; border-radius: var(--r3); }
+
+/* ── Big "Start Conversation" hero button ──────────── */
+.btn-start-conv {
+  display : inline-flex;
+  align-items : center;
+  gap : 10px;
+  padding : 15px 44px;
+  border-radius : var(--r4);
+  background : linear-gradient(135deg, var(--blue), var(--violet));
+  border : none;
+  color : #fff;
+  font-family : var(--f-head);
+  font-size : 16px;
+  font-weight : 800;
+  cursor : pointer;
+  user-select : none;
+  box-shadow : 0 18px 44px rgba(37,99,235,.32);
+  transition : transform.18s, box-shadow.18s;
+  letter-spacing:.02px;
+}
+.btn-start-conv:hover { transform: translateY(-3px); box-shadow: 0 26px 56px rgba(37,99,235,.42); }
+.btn-start-conv:active { transform: translateY(0); }
+
+/* ── Header ────────────────────────────────────────── */
+.app-header {
+  position : relative; z-index: 10;
+  display : flex;
+  align-items: center;
+  justify-content: space-between;
+  gap : 14px;
+  flex-wrap : wrap;
+  padding : 12px 18px;
+  border-radius: var(--r4);
+  border : 1px solid var(--b0);
+  background : rgba(6,12,26,.68);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow : var(--sh);
+  margin-bottom: 18px;
+}
+.header-brand {
+  display : flex;
+  align-items: center;
+  gap : 12px;
+}
+.header-logo {
+  width : 42px; height: 42px;
+  border-radius: 13px; flex-shrink: 0;
+  background : linear-gradient(135deg, var(--blue), var(--violet));
+  display : grid; place-items: center;
+  font-family : var(--f-head);
+  font-weight : 900; font-size: 20px; color: #fff;
+  box-shadow : var(--shb);
+}
+.header-brand-text { display: flex; flex-direction: column; gap: 1px; }
+.header-name {
+  font-family : var(--f-head);
+  font-weight : 900; font-size: 16px; letter-spacing: -.2px;
+}
+.header-tag { font-size: 11.5px; color: var(--dim); }
+
+.header-right {
+  display : flex;
+  align-items: center;
+  gap : 8px;
+  flex-wrap : wrap;
+}
+.stat-chip {
+  display : inline-flex;
+  align-items: center;
+  gap : 5px;
+  padding : 6px 11px;
+  border-radius: 999px;
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  font-size : 12px;
+  color : var(--mut);
+}
+.stat-chip strong { color: var(--tx); font-weight: 700; }
+
+.net-badge {
+  padding : 5px 11px;
+  border-radius: 999px;
+  background : rgba(239,68,68,.12);
+  border : 1px solid rgba(239,68,68,.3);
+  font-size : 12px; color: #f87171; font-weight: 600;
+}
+
+/* ── Bottom navigation ─────────────────────────────── */
+.bottom-nav {
+  position : fixed;
+  bottom : 14px; left: 50%;
+  transform : translateX(-50%);
+  width : min(var(--max), calc(100% - 32px));
+  display : grid;
+  grid-template-columns: repeat(3,1fr);
+  gap : 8px;
+  padding : 8px;
+  border-radius: var(--r5);
+  border : 1px solid var(--b0);
+  background: rgba(6,12,26,.82);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--sh2);
+  z-index : 100;
+}
+.nav-tab {
+  display : flex;
+  flex-direction : column;
+  align-items : center;
+  justify-content: center;
+  gap : 4px;
+  padding : 11px 8px;
+  border-radius : var(--r3);
+  border : 1px solid transparent;
+  background : transparent;
+  color : rgba(255,255,255,.46);
+  font-family : var(--f-body);
+  cursor : pointer;
+  user-select : none;
+  transition : background.16s, color.16s, border-color.16s, transform.12s;
+}
+.nav-icon { font-size: 19px; line-height: 1; }
+.nav-lbl { font-size: 11.5px; font-weight: 600; }
+.nav-tab:hover {
+  background: var(--s1);
+  color : rgba(255,255,255,.8);
+  transform : translateY(-1px);
+}
+.nav-tab.active {
+  background : rgba(37,99,235,.18);
+  border-color: rgba(37,99,235,.4);
+  color : #fff;
+  box-shadow : 0 0 0 3px rgba(37,99,235,.08);
+}
+
+/* ── AI Score bar ──────────────────────────────────── */
+.score-bar {
+  display : grid;
+  grid-template-columns: repeat(5,1fr);
+  gap : 10px;
+  padding : 14px;
+  border-radius: var(--r4);
+  border : 1px solid rgba(37,99,235,.18);
+  background : rgba(37,99,235,.06);
+  margin-bottom: 14px;
+  position : relative; z-index: 1;
+}
+.score-item {
+  border-radius: var(--r2);
+  border : 1px solid rgba(37,99,235,.18);
+  background : rgba(37,99,235,.07);
+  padding : 11px 12px;
+}
+.sc-lbl {
+  font-size : 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing:.07em;
+  color : rgba(100,160,255,.7);
+}
+.sc-val {
+  font-family: var(--f-head);
+  font-weight: 900; font-size: 19px;
+  margin-top : 4px; color: #93c5fd;
+}
+
+/* ── NAME SCREEN ───────────────────────────────────── */
+.screen-name {
+  position : relative; z-index: 1;
+  min-height : 100vh;
+  display : grid; place-items: center;
+  padding : 24px 20px;
+}
+.name-center {
+  width : 100%; max-width: 440px;
+  text-align: center;
+}
+.name-logo {
+  width : 74px; height: 74px;
+  border-radius: 20px;
+  background : linear-gradient(135deg, var(--blue), var(--violet));
+  display : grid; place-items: center;
+  font-family : var(--f-head);
+  font-weight : 900; font-size: 36px; color: #fff;
+  box-shadow : 0 20px 48px rgba(37,99,235,.32);
+  margin : 0 auto 22px;
+  animation : float 4s ease-in-out infinite;
+}
+@keyframes float {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.name-h1 {
+  font-family : var(--f-head);
+  font-weight : 900; font-size: 28px; letter-spacing: -.5px;
+  margin-bottom: 10px; line-height: 1.15;
+}
+.name-sub {
+  font-size : 13.5px; color: var(--mut);
+  margin-bottom: 28px; line-height: 1.6;
+}
+.name-card {
+  border-radius: var(--r5);
+  border : 1px solid var(--b1);
+  background : rgba(255,255,255,.05);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  padding : 28px 24px;
+  text-align : left;
+  box-shadow : var(--sh2);
+}
+
+/* ── BANNED SCREEN ─────────────────────────────────── */
+.screen-banned {
+  position : relative; z-index: 1;
+  min-height : 100vh;
+  display : grid; place-items: center;
+  padding : 24px;
+}
+.banned-center { text-align: center; max-width: 360px; }
+.banned-icon { font-size: 52px; margin-bottom: 18px; display: block; }
+
+/* ── HOME: Stats grid ──────────────────────────────── */
+.stat-grid {
+  display : grid;
+  grid-template-columns: repeat(5,1fr);
+  gap : 10px;
+  margin-top : 16px;
+}
+.stat-box {
+  border-radius: var(--r3);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  padding : 14px 12px;
+  transition : background.14s, border-color.14s, transform.13s;
+}
+.stat-box:hover { background: var(--s1); border-color: var(--b1); transform: translateY(-2px); }
+.stat-lbl {
+  font-size : 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing:.05em;
+  color : var(--mut);
+}
+.stat-num {
+  font-family: var(--f-head);
+  font-weight: 900; font-size: 23px;
+  margin-top : 6px;
+}
+
+/* ── HOME: Calendar ────────────────────────────────── */
+.cal-wrap {
+  border-radius: var(--r3);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  padding : 16px; margin-top: 14px;
+}
+.cal-header {
+  display : flex;
+  align-items : center;
+  justify-content: space-between;
+  margin-bottom : 12px;
+}
+.cal-title {
+  font-family: var(--f-head);
+  font-weight: 800; font-size: 14px;
+}
+.cal-nav-btn {
+  width: 34px; height: 32px;
+  border-radius: var(--r1);
+  border : 1px solid var(--b1);
+  background: var(--s1);
+  color : rgba(255,255,255,.7);
+  cursor : pointer; font-size: 16px; font-weight: 700;
+  display : grid; place-items: center;
+  transition: background.13s, transform.12s;
+}
+.cal-nav-btn:hover { background: var(--s2); transform: translateY(-1px); }
+.cal-dow {
+  display : grid;
+  grid-template-columns: repeat(7,1fr);
+  gap : 4px; margin-bottom: 4px;
+}
+.cal-dow span {
+  text-align : center; font-size: 10px;
+  font-weight : 700; text-transform: uppercase;
+  letter-spacing:.05em; color: var(--dim);
+  padding: 3px 0;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7,1fr);
+  gap : 4px;
+}
+.cal-cell {
+  height : 34px;
+  border-radius: var(--r1);
+  border : 1px solid rgba(255,255,255,.05);
+  background : rgba(255,255,255,.02);
+  display : grid; place-items: center;
+  font-size : 11.5px; color: rgba(255,255,255,.76);
+  cursor : default; user-select: none;
+  transition : background.12s;
+}
+.cal-cell:hover { background: rgba(255,255,255,.05); }
+.cal-cell.dim { color: var(--dim); background: transparent; }
+.cal-cell.today { border-color: rgba(245,158,11,.5); box-shadow: 0 0 0 2px rgba(245,158,11,.1); color: #fcd34d; }
+.cal-cell.done { border-color: rgba(34,197,94,.45); background: rgba(34,197,94,.09); color: #86efac; }
+.cal-cell.done.today { border-color: rgba(34,197,94,.65); }
+
+.cal-legend {
+  display : flex;
+  align-items : center;
+  gap : 16px;
+  margin-top : 10px;
+  padding-top : 10px;
+  border-top : 1px solid var(--b0);
+}
+.cal-leg-item {
+  display : flex;
+  align-items: center;
+  gap : 7px;
+  font-size : 11.5px; color: var(--mut);
+}
+.cal-dot-green,
+.cal-dot-amber {
+  width: 9px; height: 9px;
+  border-radius: 50%; display: inline-block; flex-shrink: 0;
+}
+.cal-dot-green { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,.5); }
+.cal-dot-amber { background: var(--amber); box-shadow: 0 0 5px rgba(245,158,11,.5); }
+
+/* ── HOME: Leaderboard ─────────────────────────────── */
+.lb-list {
+  display : flex;
+  flex-direction: column;
+  gap : 8px;
+}
+.lb-row {
+  display : flex;
+  align-items: center;
+  gap : 11px;
+  padding : 11px 15px;
+  border-radius: var(--r2);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  transition : background.13s, transform.12s;
+}
+.lb-row:hover { background: var(--s1); transform: translateX(2px); }
+.lb-rank {
+  font-family: var(--f-head);
+  font-weight: 900; font-size: 13px;
+  color: var(--dim); min-width: 22px;
+}
+.lb-rank.g1 { color: #fbbf24; text-shadow: 0 0 10px rgba(251,191,36,.35); }
+.lb-rank.g2 { color: #94a3b8; }
+.lb-rank.g3 { color: #b07540; }
+.lb-name { flex: 1; font-weight: 600; font-size: 13.5px; }
+.lb-badge {
+  padding : 5px 11px;
+  border-radius: 999px;
+  border : 1px solid var(--b1);
+  background : var(--s1);
+  font-size : 12px; font-weight: 700; color: var(--mut);
+}
+
+/* ── CONV: Hero ────────────────────────────────────── */
+.conv-hero {
+  text-align: center;
+  padding : 32px 20px 28px;
+}
+.conv-hero-icon {
+  font-size : 46px; display: block;
+  margin-bottom: 18px;
+  animation : bob 3s ease-in-out infinite;
+}
+@keyframes bob {
+  0%,100% { transform: translateY(0) rotate(0deg); }
+  40% { transform: translateY(-6px) rotate(-2deg); }
+  60% { transform: translateY(-4px) rotate(2deg); }
+}
+.conv-hero-title {
+  font-family : var(--f-head);
+  font-weight : 900; font-size: 24px; letter-spacing: -.3px;
+  margin-bottom: 10px; line-height: 1.15;
+}
+.conv-hero-sub {
+  font-size : 13.5px; color: var(--mut);
+  margin-bottom: 26px; line-height: 1.6;
+  max-width : 380px; margin-left: auto; margin-right: auto;
+}
+
+/* ── CONV: Online list ─────────────────────────────── */
+.online-list {
+  display : flex;
+  flex-direction: column;
+  gap : 8px;
+  max-height : 280px;
+  overflow-y : auto;
+}
+.online-list::-webkit-scrollbar { width: 5px; }
+.online-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.09); border-radius: 999px; }
+
+.ol-row {
+  display : flex;
+  align-items: center;
+  gap : 12px;
+  padding : 11px 13px;
+  border-radius: var(--r2);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  transition : background.13s, border-color.13s;
+}
+.ol-row:hover { background: var(--s1); border-color: var(--b1); }
+.ol-avatar {
+  width : 36px; height: 36px;
+  border-radius: 50%; flex-shrink: 0;
+  background : linear-gradient(135deg, rgba(37,99,235,.35), rgba(124,58,237,.35));
+  border : 1px solid var(--b1);
+  display : grid; place-items: center;
+  font-family : var(--f-head);
+  font-weight : 800; font-size: 14px;
+}
+.ol-name { flex: 1; font-weight: 600; font-size: 13.5px; }
+.ol-meta { font-size: 11.5px; color: var(--dim); }
+.ol-status { font-size: 11.5px; }
+.ol-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(34,197,94,.7);
+  animation : pg 2s ease infinite;
+}
+@keyframes pg {
+  0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,.6); }
+  50% { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+}
+.empty-state {
+  text-align: center; padding: 28px 20px;
+  color: var(--dim); font-size: 13px; line-height: 1.5;
+}
+
+/* ── CONV: Prefs ───────────────────────────────────── */
+.back-link {
+  display : inline-flex;
+  align-items: center;
+  gap : 6px;
+  font-size : 13px; font-weight: 600;
+  color : var(--mut);
+  background : none; border: none;
+  cursor : pointer;
+  margin-bottom: 16px; padding: 4px 0;
+  transition : color.13s;
+}
+.back-link:hover { color: var(--tx); }
+
+.chip-grid {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap : 9px;
+}
+.chip {
+  padding : 12px 14px;
+  border-radius: var(--r2);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  color : rgba(255,255,255,.7);
+  font-family : var(--f-body);
+  font-size : 13.5px; font-weight: 600;
+  cursor : pointer; text-align: center;
+  user-select : none;
+  transition : background.14s, border-color.14s, transform.12s, color.14s;
+}
+.chip:hover { background: var(--s1); border-color: var(--b2); color: var(--tx); transform: translateY(-1px); }
+.chip.active {
+  background : rgba(37,99,235,.18);
+  border-color: rgba(37,99,235,.5);
+  color : #fff;
+  box-shadow : 0 0 0 3px rgba(37,99,235,.09);
+}
+.chip-ai.active {
+  background : rgba(124,58,237,.2);
+  border-color: rgba(124,58,237,.52);
+  box-shadow : 0 0 0 3px rgba(124,58,237,.09);
+}
+
+/* ── CONV: Human chat header ───────────────────────── */
+.chat-header {
+  display : flex;
+  align-items : center;
+  justify-content: space-between;
+  gap : 12px;
+  margin-bottom : 16px;
+}
+.partner-row {
+  display : flex;
+  align-items: center;
+  gap : 11px;
+}
+.partner-avatar {
+  width : 40px; height: 40px;
+  border-radius: 50%; flex-shrink: 0;
+  background : linear-gradient(135deg, rgba(37,99,235,.38), rgba(124,58,237,.38));
+  border : 1px solid var(--b1);
+  display : grid; place-items: center;
+  font-family : var(--f-head);
+  font-weight : 800; font-size: 17px;
+}
+.partner-name { font-family: var(--f-head); font-weight: 800; font-size: 14.5px; }
+.partner-status {
+  display : flex;
+  align-items: center;
+  gap : 5px;
+  font-size : 11.5px; color: var(--green);
+  margin-top : 2px;
+}
+.status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 5px rgba(34,197,94,.6);
+  display : inline-block;
+}
+
+/* ── CONV: Icebreaker ──────────────────────────────── */
+.icebreaker {
+  border-radius: var(--r3);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  padding : 14px;
+  margin-bottom: 14px;
+}
+.ice-top {
+  display : flex;
+  align-items : center;
+  justify-content: space-between;
+  margin-bottom : 10px;
+}
+.ice-label {
+  font-size : 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing:.09em;
+  color : var(--dim);
+}
+.ice-counter { font-size: 11.5px; color: var(--dim); font-weight: 600; }
+.ice-body {
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  gap : 10px; align-items: center;
+}
+.ice-btn {
+  width: 40px; height: 40px;
+  border-radius: var(--r1);
+  border : 1px solid var(--b1); background: var(--s1);
+  color : rgba(255,255,255,.7);
+  font-weight: 800; font-size: 15px;
+  cursor : pointer; display: grid; place-items: center;
+  transition: background.13s, transform.12s;
+}
+.ice-btn:hover { background: var(--s2); transform: translateY(-1px); }
+.ice-btn:disabled { opacity:.3; cursor: not-allowed; transform: none; }
+.ice-text {
+  padding: 11px 14px;
+  border-radius: var(--r2);
+  border : 1px solid var(--b0);
+  background: rgba(6,12,26,.45);
+  font-size: 13.5px; line-height: 1.55; text-align: center;
+}
+
+/* ── CONV: Controls row ────────────────────────────── */
+.ctrl-row {
+  display : flex;
+  align-items: center;
+  gap : 9px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.rate-group { display: flex; gap: 5px; margin-left: auto; }
+.rate-star {
+  width: 32px; height: 32px;
+  border-radius: var(--r1);
+  border : 1px solid var(--b1); background: var(--s1);
+  color : rgba(255,255,255,.68);
+  font-size : 11.5px; font-weight: 700;
+  cursor : pointer; display: grid; place-items: center;
+  transition: background.13s, transform.12s;
+}
+.rate-star:hover { background: var(--s2); transform: translateY(-1px); }
+.rate-star.picked {
+  background : rgba(245,158,11,.14);
+  border-color: rgba(245,158,11,.45);
+  color : #fbbf24;
+}
+
+/* ── CONV: Voice hint ──────────────────────────────── */
+.voice-hint {
+  font-size : 12.5px; color: var(--mut);
+  padding : 8px 12px;
+  border-radius: var(--r1);
+  background : var(--s0); border: 1px solid var(--b0);
+  margin-bottom: 10px; line-height: 1.4;
+}
+
+/* ── Messages ──────────────────────────────────────── */
+.msg-box {
+  border-radius: var(--r3);
+  border : 1px solid var(--b0);
+  background : rgba(0,0,0,.22);
+  padding : 12px;
+  max-height : 300px;
+  overflow-y : auto;
+  margin-bottom: 12px;
+}
+.msg-box::-webkit-scrollbar { width: 5px; }
+.msg-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 999px; }
+.msg-box::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.13); }
+
+.msg-item { margin: 11px 0; overflow: hidden; }
+
+.msg-from {
+  font-size : 10.5px; font-weight: 700;
+  color : var(--dim); margin-bottom: 4px;
+}
+.msg-bubble {
+  display : inline-block; max-width: 88%;
+  padding : 10px 14px;
+  border-radius: var(--r2);
+  border : 1px solid var(--b0); background: var(--s1);
+  font-size : 13.5px; line-height: 1.55; word-break: break-word;
+}
+
+/* Own messages — float right, blue tint */
+.msg-item.me .msg-from { text-align: right; }
+.msg-item.me .msg-bubble {
+  background : rgba(37,99,235,.16);
+  border-color: rgba(37,99,235,.28);
+  float: right; clear: both;
+}
+
+/* System messages — centered, dim */
+.msg-item.sys .msg-from { display: none; }
+.msg-item.sys .msg-bubble {
+  background : transparent;
+  border-color: transparent;
+  color : var(--dim);
+  font-size : 11.5px;
+  display : block; text-align: center;
+  max-width : 100%; padding: 3px 0;
+  border-radius: 0;
+}
+
+/* ── Composer ──────────────────────────────────────── */
+.composer {
+  display : flex;
+  gap : 9px;
+  align-items: center;
+}
+.composer .inp { flex: 1; padding: 11px 14px; font-size: 14px; }
+
+/* ── AI COACH TAB ──────────────────────────────────── */
+.ai-panel-hdr {
+  display : flex;
+  align-items : flex-start;
+  justify-content: space-between;
+  gap : 12px; flex-wrap: wrap;
+  margin-bottom : 16px;
+}
+.ai-status-badge {
+  display : inline-flex;
+  align-items: center;
+  gap : 8px;
+  padding : 6px 13px; border-radius: 999px;
+  background : linear-gradient(135deg, rgba(124,58,237,.2), rgba(37,99,235,.14));
+  border : 1px solid rgba(124,58,237,.28);
+  font-size : 12px; font-weight: 700; color: #c4b5fd;
+}
+.ai-pulse-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #a78bfa;
+  box-shadow: 0 0 7px rgba(167,139,250,.7);
+  animation : pv 2.5s ease infinite;
+}
+@keyframes pv {
+  0%,100% { box-shadow: 0 0 0 0 rgba(167,139,250,.6); }
+  50% { box-shadow: 0 0 0 5px rgba(167,139,250,0); }
+}
+
+.ai-hint-bar {
+  padding : 11px 15px;
+  border-radius: var(--r2);
+  border : 1px solid rgba(124,58,237,.18);
+  background : rgba(124,58,237,.06);
+  font-size : 13px; color: rgba(255,255,255,.6);
+  margin-bottom: 14px; min-height: 46px;
+  display : flex; align-items: center; line-height: 1.5;
+}
+.ai-hint-bar strong { color: rgba(255,255,255,.85); }
+
+.ai-ctrl-row {
+  display : flex;
+  gap : 9px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+/* Voice On button while actively listening */
+#btnAiVoice.on {
+  background : rgba(239,68,68,.14);
+  border-color: rgba(239,68,68,.38);
+  color : #f87171;
+  animation : pr 1.8s ease infinite;
+}
+@keyframes pr {
+  0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,.35); }
+  50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+}
+
+/* ── AI Report ─────────────────────────────────────── */
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap : 10px; margin: 14px 0;
+}
+.report-item {
+  border-radius: var(--r2);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  padding : 12px 14px;
+  transition : background.13s;
+}
+.report-item:hover { background: var(--s1); }
+.report-item-band {
+  grid-column: 1 / -1;
+  background : rgba(37,99,235,.07);
+  border-color: rgba(37,99,235,.2);
+  text-align : center;
+}
+.ri-lbl {
+  font-size : 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing:.07em;
+  color : var(--dim); margin-bottom: 4px;
+}
+.ri-val {
+  font-family: var(--f-head);
+  font-size : 21px; font-weight: 900;
+}
+.ri-val-big { font-size: 36px; color: #93c5fd; }
+
+.report-section { margin-top: 6px; }
+
+.report-list {
+  list-style : none;
+  display : flex;
+  flex-direction: column;
+  gap : 6px; margin-top: 8px;
+}
+.report-list li {
+  padding : 9px 14px 9px 28px;
+  border-radius: var(--r2);
+  border : 1px solid var(--b0);
+  background : var(--s0);
+  font-size : 13px; line-height: 1.45;
+  color : rgba(255,255,255,.7);
+  position : relative;
+}
+.fix-list li::before { content: '✕'; position: absolute; left:11px; top:10px; color:#f87171; font-size:10px; }
+.step-list li::before { content: '→'; position: absolute; left:11px; top: 9px; color:#60a5fa; font-size:11px; }
+
+/* ── Scrollbar global ──────────────────────────────── */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.14); }
+
+/* ── Responsive ────────────────────────────────────── */
+@media (max-width: 900px) {
+ .stat-grid { grid-template-columns: repeat(3,1fr); }
+ .score-bar { grid-template-columns: repeat(3,1fr); }
+ .report-grid { grid-template-columns: repeat(2,1fr); }
+ .report-item-band { grid-column: 1 / -1; }
+}
+
+@media (max-width: 620px) {
+ .shell { padding: 14px 12px 104px; }
+ .app-header { padding: 10px 14px; }
+ .stat-grid { grid-template-columns: repeat(2,1fr); }
+ .score-bar { grid-template-columns: repeat(2,1fr); }
+ .report-grid { grid-template-columns: 1fr; }
+ .report-item-band { grid-column: 1; }
+ .composer { flex-direction: column; align-items: stretch; }
+ .ctrl-row { gap: 7px; }
+ .rate-group { margin-left: 0; }
+ .ice-body { grid-template-columns: 38px 1fr 38px; }
+ .header-tag { display: none; }
+ .nav-lbl { font-size: 10.5px; }
+}
+
+@media (max-width: 420px) {
+ .stat-num { font-size: 20px; }
+ .msg-box { max-height: 240px; }
+ .conv-hero-title { font-size: 21px; }
+ .name-h1 { font-size: 24px; }
+ .btn-start-conv { padding: 14px 28px; font-size: 15px; }
+ .nav-icon { font-size: 17px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration :.01ms!important;
+    animation-iteration-count: 1!important;
+    transition-duration :.01ms!important;
+  }
+}
+</style>
 
 <!-- Decorative background -->
 <div class="bg-glow" aria-hidden="true"></div>
@@ -58,7 +1099,6 @@
   </div>
 </div>
 
-
 <!-- ══════════════════════════════════════════════════════
      SCREEN: BANNED
 ══════════════════════════════════════════════════════════ -->
@@ -72,7 +1112,6 @@
     </p>
   </div>
 </div>
-
 
 <!-- ══════════════════════════════════════════════════════
      SCREEN: MAIN APP
@@ -111,7 +1150,6 @@
       <div class="score-item"><div class="sc-lbl">Vocab</div><div class="sc-val" id="myVoc">—</div></div>
       <div class="score-item"><div class="sc-lbl">Pron</div><div class="sc-val" id="myPro">—</div></div>
     </div>
-
 
     <!-- ════════════════════════════════════
          TAB: HOME
@@ -196,7 +1234,6 @@
 
     </section><!-- /tabHome -->
 
-
     <!-- ════════════════════════════════════
          TAB: CONVERSATION
     ════════════════════════════════════════ -->
@@ -234,7 +1271,6 @@
 
       </div><!-- /convIdle -->
 
-
       <!-- ─── B: PREFS — Gender / Level / AI selection ───── -->
       <div id="convPrefs" style="display:none;">
         <div class="card">
@@ -248,18 +1284,18 @@
 
           <p class="pref-section-lbl">Partner gender</p>
           <div class="chip-grid" id="genderChips" role="group" aria-label="Partner gender">
-            <button class="chip active"  data-val="Any"    type="button">🌍 Any</button>
-            <button class="chip"         data-val="Male"   type="button">👨 Male</button>
-            <button class="chip"         data-val="Female" type="button">👩 Female</button>
-            <button class="chip chip-ai" data-val="AI"     type="button">🤖 AI Coach</button>
+            <button class="chip active" data-val="Any" type="button">🌍 Any</button>
+            <button class="chip" data-val="Male" type="button">👨 Male</button>
+            <button class="chip" data-val="Female" type="button">👩 Female</button>
+            <button class="chip chip-ai" data-val="AI" type="button">🤖 AI Coach</button>
           </div>
 
           <p class="pref-section-lbl" style="margin-top:20px;">English level</p>
           <div class="chip-grid" id="levelChips" role="group" aria-label="English level">
-            <button class="chip active" data-val="Any"          type="button">📚 Any</button>
-            <button class="chip"        data-val="Beginner"     type="button">🌱 Beginner</button>
-            <button class="chip"        data-val="Intermediate" type="button">🧩 Intermediate</button>
-            <button class="chip"        data-val="Advanced"     type="button">🚀 Advanced</button>
+            <button class="chip active" data-val="Any" type="button">📚 Any</button>
+            <button class="chip" data-val="Beginner" type="button">🌱 Beginner</button>
+            <button class="chip" data-val="Intermediate" type="button">🧩 Intermediate</button>
+            <button class="chip" data-val="Advanced" type="button">🚀 Advanced</button>
           </div>
 
           <div class="row-gap" style="margin-top:22px;">
@@ -278,7 +1314,6 @@
 
         </div>
       </div><!-- /convPrefs -->
-
 
       <!-- ─── C: HUMAN CHAT ─────────────────────────────── -->
       <div id="convChat" style="display:none;">
@@ -357,10 +1392,8 @@
 
     </section><!-- /tabConv -->
 
-
     <!-- ════════════════════════════════════
          TAB: AI COACH
-         Fully separate — only AI content here
     ════════════════════════════════════════ -->
     <section id="tabAi" style="display:none;" role="tabpanel" aria-label="AI Coach">
 
@@ -423,7 +1456,6 @@
 
       </div><!-- /AI session card -->
 
-
       <!-- AI Report — shown after session ends -->
       <div id="aiReport" class="card" style="display:none;" role="region" aria-label="AI Report">
 
@@ -465,7 +1497,6 @@
 
   </div><!-- /shell -->
 
-
   <!-- BOTTOM NAV -->
   <nav class="bottom-nav" role="navigation" aria-label="Main navigation">
     <button class="nav-tab" id="navHome" type="button" aria-label="Home">
@@ -484,7 +1515,1186 @@
 
 </div><!-- /sMain -->
 
+
+<!-- ✅ REAL Socket.IO (serverdan keladi) -->
 <script src="/socket.io/socket.io.js"></script>
-<script src="/public/app.js"></script>
+
+<script>
+"use strict";
+
+/* ─────────────────────────────────────────────────────────
+   ✅ REAL SOCKET — server bilan haqiqiy ulanish
+───────────────────────────────────────────────────────── */
+const socket = io({
+  transports: ["websocket", "polling"],
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1500,
+});
+
+/* ─────────────────────────────────────────────────────────
+   DOM HELPERS
+───────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const now = () => Date.now();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, +v || 0));
+
+function show(el, visible, as = "") {
+  if (!el) return;
+  el.style.display = visible ? (as || "") : "none";
+}
+
+function esc(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function addMsg(boxId, from, text, kind = "") {
+  const box = $(boxId);
+  if (!box) return;
+  const wrap = document.createElement("div");
+  wrap.className = "msg-item" + (kind ? " " + kind : "");
+  wrap.innerHTML =
+    `<div class="msg-from">${esc(from)}</div>` +
+    `<div class="msg-bubble">${esc(text)}</div>`;
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ─────────────────────────────────────────────────────────
+   LOCAL STORAGE KEYS
+───────────────────────────────────────────────────────── */
+const LS_NAME = "wt_name_v5";
+const LS_PRAC = "wt_prac_v5";
+
+/* ─────────────────────────────────────────────────────────
+   APP STATE
+───────────────────────────────────────────────────────── */
+const S = {
+  name: "",
+  prefs: { gender: "Any", level: "Any" },
+  room: { id: null, partner: null, polite: false },
+  ai: { id: null },
+  questions: [],
+  qIdx: 0,
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  forceRelay: false,
+  audioWarm: false,
+  pc: null,
+  stream: null,
+  voiceOn: false,
+  makingOffer: false,
+  ignoreOffer: false,
+  aiListening: false,
+  aiSpeaking: false,
+  aiLastText: "",
+  aiRec: null,
+  aiAutoStop: null,
+  prac: { sessions: 0, minutes: 0, days: {} },
+  cal: { y: new Date().getFullYear(), m: new Date().getMonth() },
+  humanTs: 0,
+  aiTs: 0,
+  lastHumanSend: 0,
+  lastAiSend: 0,
+  cdMs: 450,
+};
+
+/* ─────────────────────────────────────────────────────────
+   SCREEN MANAGEMENT
+───────────────────────────────────────────────────────── */
+function showScreen(name) {
+  $("sName").style.display = name === "name" ? "grid" : "none";
+  $("sBanned").style.display = name === "banned" ? "grid" : "none";
+  $("sMain").style.display = name === "main" ? "block" : "none";
+}
+
+/* ─────────────────────────────────────────────────────────
+   TAB SYSTEM
+───────────────────────────────────────────────────────── */
+function setTab(tab) {
+  if (tab !== "ai" && S.aiListening) {
+    stopAiMic();
+    hintAi("Mic stopped (tab changed).");
+  }
+
+  $("tabHome").style.display = tab === "home" ? "block" : "none";
+  $("tabConv").style.display = tab === "conv" ? "block" : "none";
+  $("tabAi").style.display  = tab === "ai"   ? "block" : "none";
+
+  ["navHome", "navConv", "navAi"].forEach(id => $(id)?.classList.remove("active"));
+  const navMap = { home: "navHome", conv: "navConv", ai: "navAi" };
+  $(navMap[tab])?.classList.add("active");
+}
+
+/* ─────────────────────────────────────────────────────────
+   CONVERSATION SUB-STATES
+───────────────────────────────────────────────────────── */
+function convState(s) {
+  $("convIdle").style.display  = s === "idle"  ? "block" : "none";
+  $("convPrefs").style.display = s === "prefs" ? "block" : "none";
+  $("convChat").style.display  = s === "chat"  ? "block" : "none";
+}
+
+/* ─────────────────────────────────────────────────────────
+   HINT HELPERS
+───────────────────────────────────────────────────────── */
+function hintVoice(txt) {
+  const el = $("voiceHint");
+  if (!el) return;
+  el.textContent = txt || "";
+  el.style.display = txt ? "block" : "none";
+}
+
+function hintAi(html) {
+  const el = $("aiHintBar");
+  if (el) el.innerHTML = html || "";
+}
+
+function hintSearch(txt) {
+  const el = $("searchInfo");
+  if (el) el.textContent = txt || "";
+}
+
+/* ─────────────────────────────────────────────────────────
+   NET BADGE
+───────────────────────────────────────────────────────── */
+function netBadge(txt) {
+  const el = $("netBadge");
+  if (!el) return;
+  el.textContent = txt || "";
+  el.style.display = txt ? "inline-flex" : "none";
+}
+
+/* ─────────────────────────────────────────────────────────
+   PRACTICE (localStorage)
+───────────────────────────────────────────────────────── */
+function dKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function loadPrac() {
+  try {
+    const j = JSON.parse(localStorage.getItem(LS_PRAC) || "{}");
+    if (typeof j.sessions === "number") S.prac.sessions = j.sessions;
+    if (typeof j.minutes  === "number") S.prac.minutes  = j.minutes;
+    if (j.days && typeof j.days === "object") S.prac.days = j.days;
+  } catch (_) {}
+}
+
+function savePrac() {
+  try { localStorage.setItem(LS_PRAC, JSON.stringify(S.prac)); } catch (_) {}
+}
+
+function markPrac(mins = 0, sess = 0) {
+  const k = dKey(new Date());
+  if (!S.prac.days[k]) S.prac.days[k] = { minutes: 0, sessions: 0 };
+  S.prac.days[k].minutes  += Math.max(0, mins);
+  S.prac.days[k].sessions += Math.max(0, sess);
+  S.prac.minutes  += Math.max(0, mins);
+  S.prac.sessions += Math.max(0, sess);
+  savePrac();
+  renderStats();
+  renderCal();
+}
+
+function pracDays() { return Object.keys(S.prac.days || {}).length; }
+
+function calcStreak() {
+  const d = new Date();
+  let streak = 0;
+  for (let i = 0; i < 3650; i++) {
+    if (S.prac.days[dKey(d)]) streak++;
+    else break;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+function calcMissed7() {
+  const d = new Date();
+  let p = 0;
+  for (let i = 0; i < 7; i++) {
+    if (S.prac.days[dKey(d)]) p++;
+    d.setDate(d.getDate() - 1);
+  }
+  return Math.max(0, 7 - p);
+}
+
+function sessionStart(kind) {
+  if (kind === "human") S.humanTs = now();
+  if (kind === "ai")    S.aiTs    = now();
+}
+
+function sessionEnd(kind) {
+  const end = now();
+  if (kind === "human" && S.humanTs) {
+    markPrac(Math.max(1, Math.round((end - S.humanTs) / 60000)), 1);
+    S.humanTs = 0;
+  }
+  if (kind === "ai" && S.aiTs) {
+    markPrac(Math.max(1, Math.round((end - S.aiTs) / 60000)), 1);
+    S.aiTs = 0;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: STATS
+───────────────────────────────────────────────────────── */
+function renderStats() {
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v); };
+  set("hSessions", S.prac.sessions);
+  set("hDays",     pracDays());
+  set("hMinutes",  S.prac.minutes);
+  set("hStreak",   calcStreak());
+  set("hMissed",   calcMissed7());
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: CALENDAR
+───────────────────────────────────────────────────────── */
+const MONTH_NAMES = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December"
+];
+
+function renderCal() {
+  const grid  = $("calGrid");
+  const title = $("calTitle");
+  if (!grid || !title) return;
+
+  const { y, m } = S.cal;
+  title.textContent = `${MONTH_NAMES[m]} ${y}`;
+  grid.innerHTML = "";
+
+  const firstDow    = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const prevDays    = new Date(y, m, 0).getDate();
+  const todayKey    = dKey(new Date());
+
+  for (let i = 0; i < 42; i++) {
+    const cell = document.createElement("div");
+    cell.className = "cal-cell";
+
+    const n = i - firstDow + 1;
+    let k = null;
+
+    if (n <= 0) {
+      const pd = prevDays + n;
+      cell.textContent = String(pd);
+      cell.classList.add("dim");
+      k = dKey(new Date(y, m - 1, pd));
+    } else if (n > daysInMonth) {
+      const nd = n - daysInMonth;
+      cell.textContent = String(nd);
+      cell.classList.add("dim");
+      k = dKey(new Date(y, m + 1, nd));
+    } else {
+      cell.textContent = String(n);
+      k = dKey(new Date(y, m, n));
+    }
+
+    if (k === todayKey)    cell.classList.add("today");
+    if (S.prac.days[k])   cell.classList.add("done");
+
+    cell.addEventListener("click", () => {
+      if (k && S.prac.days[k]) {
+        const d = S.prac.days[k];
+        hintAi(`📅 ${k}: ${d.minutes} min, ${d.sessions} sessions`);
+      }
+    });
+
+    grid.appendChild(cell);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: AI SCORE BAR
+───────────────────────────────────────────────────────── */
+function renderScore(sc) {
+  if (!sc) return;
+  const bar = $("scoreBar");
+  if (bar) bar.style.display = "grid";
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? "—"); };
+  set("myBand", sc.band);
+  set("myFlu",  sc.fluency);
+  set("myGra",  sc.grammar);
+  set("myVoc",  sc.vocab);
+  set("myPro",  sc.pronunciation);
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: ONLINE USERS LIST
+───────────────────────────────────────────────────────── */
+function renderOnline(users) {
+  const list = $("onlineList");
+  const cnt  = $("onlineCount");
+  if (!list) return;
+
+  const all    = Array.isArray(users) ? users : [];
+  const others = all.filter(u => u.name !== S.name);
+
+  if (cnt) cnt.textContent = String(all.length);
+
+  if (!others.length) {
+    list.innerHTML = `<div class="empty-state">No one else online right now. Invite a friend!</div>`;
+    return;
+  }
+
+  list.innerHTML = "";
+  others.forEach(u => {
+    const row = document.createElement("div");
+    row.className = "ol-row";
+
+    const ini  = (u.name || "?")[0].toUpperCase();
+    const meta = [
+      u.gender !== "Any" ? u.gender : null,
+      u.level  !== "Any" ? u.level  : null,
+    ].filter(Boolean).join(" · ");
+
+    const statusHtml = u.roomId
+      ? `<span class="ol-status" style="color:var(--dim);">In session</span>`
+      : `<span class="ol-status" style="color:#86efac;">Available</span>`;
+
+    row.innerHTML = `
+      <div class="ol-avatar">${esc(ini)}</div>
+      <div class="ol-name">${esc(u.name)}</div>
+      <div class="ol-meta">${esc(meta)}</div>
+      ${statusHtml}
+      <div class="ol-dot"></div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: ICEBREAKER QUESTION
+───────────────────────────────────────────────────────── */
+function renderQ() {
+  const total = S.questions.length || 10;
+  S.qIdx = clamp(S.qIdx, 0, total - 1);
+
+  const qi = $("qIdx");  if (qi) qi.textContent = String(S.qIdx + 1);
+  const qt = $("qText"); if (qt) qt.textContent = S.questions[S.qIdx] || "Loading questions…";
+
+  const prev = $("qPrev");
+  const next = $("qNext");
+  if (prev) { prev.disabled = S.qIdx === 0;         prev.style.opacity = prev.disabled ? ".3" : "1"; }
+  if (next) { next.disabled = S.qIdx === total - 1; next.style.opacity = next.disabled ? ".3" : "1"; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   RENDER: LEADERBOARD
+───────────────────────────────────────────────────────── */
+function renderLb(rows) {
+  const el = $("leaderboard");
+  if (!el) return;
+
+  const arr = Array.isArray(rows) ? rows : [];
+  if (!arr.length) {
+    el.innerHTML = `<div class="empty-state">No ratings yet.</div>`;
+    return;
+  }
+
+  el.innerHTML = "";
+  arr.slice(0, 20).forEach((x, i) => {
+    const row = document.createElement("div");
+    row.className = "lb-row";
+    const rankClass = i === 0 ? "lb-rank g1" : i === 1 ? "lb-rank g2" : i === 2 ? "lb-rank g3" : "lb-rank";
+    row.innerHTML = `
+      <div class="${rankClass}">${i + 1}</div>
+      <div class="lb-name">${esc(x.name)}</div>
+      <div class="lb-badge">⭐ ${esc(String(x.avg))} <span style="opacity:.6;">(${esc(String(x.count))})</span></div>
+    `;
+    el.appendChild(row);
+  });
+}
+
+/* ─────────────────────────────────────────────────────────
+   CHIPS
+───────────────────────────────────────────────────────── */
+function syncChips(groupId, activeVal) {
+  const g = $(groupId);
+  if (!g) return;
+  g.querySelectorAll(".chip").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.val === activeVal);
+  });
+}
+
+/* ─────────────────────────────────────────────────────────
+   RESET HELPERS
+───────────────────────────────────────────────────────── */
+function resetConv() {
+  const msgs = $("messages"); if (msgs) msgs.innerHTML = "";
+  const mi   = $("msgInput"); if (mi)   mi.value = "";
+
+  S.room    = { id: null, partner: null, polite: false };
+  S.qIdx    = 0;
+  S.humanTs = 0;
+
+  renderQ();
+  hintVoice("");
+  hintSearch("");
+  stopVoice().catch(() => {});
+  convState("idle");
+}
+
+function resetAi() {
+  const am = $("aiMessages"); if (am) am.innerHTML = "";
+  const ai = $("aiInput");    if (ai) ai.value = "";
+  const ar = $("aiReport");   if (ar) ar.style.display = "none";
+
+  S.ai   = { id: null };
+  S.aiTs = 0;
+
+  stopAiMic();
+  setAiVoiceBtn();
+  hintAi("Press <strong>Start AI</strong> below to begin your session.");
+}
+
+/* ─────────────────────────────────────────────────────────
+   RTC CONFIG
+───────────────────────────────────────────────────────── */
+async function loadRtcCfg() {
+  try {
+    const r = await fetch("/webrtc-config");
+    const j = await r.json();
+    if (Array.isArray(j?.iceServers) && j.iceServers.length) S.iceServers = j.iceServers;
+    S.forceRelay = !!j?.forceRelay;
+  } catch (_) {}
+}
+
+/* ─────────────────────────────────────────────────────────
+   AUDIO WARM-UP
+───────────────────────────────────────────────────────── */
+async function warmAudio() {
+  if (S.audioWarm) return;
+  S.audioWarm = true;
+  const a = $("remoteAudio");
+  if (!a) return;
+  try { a.muted = true; await a.play().catch(() => {}); a.muted = false; } catch (_) {}
+}
+
+/* ─────────────────────────────────────────────────────────
+   WebRTC
+───────────────────────────────────────────────────────── */
+function buildPeer() {
+  destroyPeer();
+
+  S.pc = new RTCPeerConnection({
+    iceServers: S.iceServers,
+    iceTransportPolicy: S.forceRelay ? "relay" : "all",
+  });
+
+  S.pc.ontrack = ev => {
+    const [st] = ev.streams;
+    const a = $("remoteAudio");
+    if (st && a) { a.srcObject = st; a.play().catch(() => {}); }
+  };
+
+  S.pc.onicecandidate = ev => {
+    if (ev.candidate && S.room.id)
+      socket.emit("webrtc:ice", { roomId: S.room.id, candidate: ev.candidate });
+  };
+
+  S.pc.onconnectionstatechange = () => {
+    if (!S.pc) return;
+    const cs = S.pc.connectionState;
+    if (cs === "connected")    hintVoice("Voice connected ✅");
+    if (cs === "failed")       hintVoice("Voice failed ❌ (check network / TURN required)");
+    if (cs === "disconnected") hintVoice("Voice disconnected.");
+  };
+
+  S.pc.onnegotiationneeded = async () => {
+    try {
+      S.makingOffer = true;
+      const offer = await S.pc.createOffer({ offerToReceiveAudio: true });
+      if (!S.pc || S.pc.signalingState !== "stable") return;
+      await S.pc.setLocalDescription(offer);
+      socket.emit("webrtc:offer", { roomId: S.room.id, sdp: S.pc.localDescription });
+    } catch (_) {
+      hintVoice("Offer error.");
+    } finally {
+      S.makingOffer = false;
+    }
+  };
+}
+
+function destroyPeer() {
+  if (!S.pc) return;
+  try { S.pc.ontrack = null; S.pc.onicecandidate = null; S.pc.onnegotiationneeded = null; } catch (_) {}
+  try { S.pc.close(); } catch (_) {}
+  S.pc = null;
+}
+
+async function handleOffer(sdp, from) {
+  if (!S.room.id) return;
+  if (!S.pc) buildPeer();
+
+  const collision = S.makingOffer || S.pc.signalingState !== "stable";
+  S.ignoreOffer = !S.room.polite && collision;
+  if (S.ignoreOffer) return;
+
+  try {
+    await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+    if (sdp.type === "offer") {
+      if (S.stream && S.voiceOn) {
+        const senders = S.pc.getSenders();
+        S.stream.getTracks().forEach(t => {
+          if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
+        });
+      }
+
+      const ans = await S.pc.createAnswer();
+      await S.pc.setLocalDescription(ans);
+      socket.emit("webrtc:answer", { roomId: S.room.id, sdp: S.pc.localDescription });
+      hintVoice(`${esc(from)} turned on voice — you can hear them. Press Voice On to also speak.`);
+    }
+  } catch (_) {
+    hintVoice("Voice connection error.");
+  }
+}
+
+async function startVoice() {
+  if (!S.room.id) { hintVoice("Join a room first."); return; }
+  if (S.voiceOn) return;
+
+  hintVoice("Requesting microphone…");
+
+  try {
+    S.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
+      },
+      video: false,
+    });
+  } catch (_) {
+    hintVoice("Microphone access denied. Allow mic in your browser settings.");
+    return;
+  }
+
+  S.voiceOn = true;
+  const btn = $("btnVoice");
+  if (btn) btn.innerHTML = "🔴 Voice Off";
+
+  if (!S.pc) buildPeer();
+
+  const senders = S.pc.getSenders();
+  S.stream.getTracks().forEach(t => {
+    if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
+  });
+
+  hintVoice("Mic on ✅ Connecting voice to partner…");
+}
+
+async function stopVoice() {
+  S.voiceOn = false;
+
+  const btn = $("btnVoice");
+  if (btn) btn.innerHTML = "🎙️ Voice On";
+  hintVoice("");
+
+  if (S.stream) {
+    S.stream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+    S.stream = null;
+  }
+
+  destroyPeer();
+
+  const a = $("remoteAudio");
+  if (a) a.srcObject = null;
+}
+
+/* ─────────────────────────────────────────────────────────
+   AI VOICE
+───────────────────────────────────────────────────────── */
+const SR   = window.SpeechRecognition || window.webkitSpeechRecognition;
+const aiOk = () => !!SR && !!window.speechSynthesis;
+
+function setAiVoiceBtn() {
+  const btn = $("btnAiVoice");
+  if (!btn) return;
+  if (S.aiListening) {
+    btn.textContent = "🛑 Voice Off";
+    btn.classList.add("on");
+  } else {
+    btn.textContent = "🎙️ Voice On";
+    btn.classList.remove("on");
+  }
+}
+
+async function aiSpeak(text) {
+  return new Promise(resolve => {
+    if (!window.speechSynthesis) { resolve(); return; }
+    try {
+      window.speechSynthesis.cancel();
+      const utt = new SpeechSynthesisUtterance(String(text || ""));
+      utt.lang  = "en-US";
+      utt.rate  = 1;
+      utt.pitch = 1;
+      S.aiSpeaking = true;
+      hintAi("AI speaking… 🔊");
+
+      utt.onend  = () => { S.aiSpeaking = false; hintAi("Your turn → Voice On → speak → Voice Off 🎙️"); resolve(); };
+      utt.onerror= () => { S.aiSpeaking = false; hintAi("TTS error."); resolve(); };
+
+      window.speechSynthesis.speak(utt);
+    } catch (_) {
+      S.aiSpeaking = false;
+      resolve();
+    }
+  });
+}
+
+function stopAiMic() {
+  clearTimeout(S.aiAutoStop);
+  S.aiAutoStop  = null;
+  S.aiListening = false;
+  setAiVoiceBtn();
+
+  const rec = S.aiRec;
+  S.aiRec = null;
+  try { rec && rec.stop(); } catch (_) {}
+}
+
+function startAiMic() {
+  if (!S.ai.id)   { hintAi("Press <strong>Start AI</strong> first."); return; }
+  if (!aiOk())    { hintAi("Voice requires Chrome with SpeechRecognition support."); return; }
+  if (S.aiSpeaking) { hintAi("Wait — AI is still speaking…"); return; }
+  if (S.aiListening) return;
+
+  const rec = new SR();
+  S.aiRec = rec;
+  rec.lang           = "en-US";
+  rec.interimResults = true;
+  rec.continuous     = true;
+
+  S.aiLastText  = "";
+  S.aiListening = true;
+  setAiVoiceBtn();
+  hintAi("Listening… speak now 🎙️ Press <strong>Voice Off</strong> when done.");
+
+  rec.onresult = e => {
+    let final = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) final += (final ? " " : "") + (r[0]?.transcript || "").trim();
+    }
+    if (final) S.aiLastText = (S.aiLastText + " " + final).trim();
+
+    clearTimeout(S.aiAutoStop);
+    S.aiAutoStop = setTimeout(() => {
+      if (S.aiListening) stopAiMicAndSend();
+    }, 2200);
+  };
+
+  rec.onerror = () => { hintAi("Mic error."); stopAiMic(); };
+  rec.onend   = () => { if (S.aiListening) { try { rec.start(); } catch (_) {} } };
+
+  try { rec.start(); } catch (_) {}
+}
+
+async function stopAiMicAndSend() {
+  if (!S.aiListening) return;
+  stopAiMic();
+
+  const txt = (S.aiLastText || "").trim();
+  if (!txt) { hintAi("No speech detected. Try again."); return; }
+
+  addMsg("aiMessages", S.name, txt, "me");
+  socket.emit("chat:message", { roomId: S.ai.id, text: txt });
+  markPrac(1, 0);
+  hintAi("Sent ✅ Waiting for AI Coach…");
+}
+
+/* ─────────────────────────────────────────────────────────
+   SEND MESSAGE HELPERS
+───────────────────────────────────────────────────────── */
+function sendHuman() {
+  if (now() - S.lastHumanSend < S.cdMs) { hintVoice("Slow down a bit…"); return; }
+  S.lastHumanSend = now();
+
+  const mi  = $("msgInput");
+  const txt = (mi?.value || "").trim();
+  if (!txt || !S.room.id) return;
+  if (mi) mi.value = "";
+  socket.emit("chat:message", { roomId: S.room.id, text: txt });
+}
+
+function sendAi() {
+  if (now() - S.lastAiSend < S.cdMs) { hintAi("Slow down a bit…"); return; }
+  S.lastAiSend = now();
+
+  const ai  = $("aiInput");
+  const txt = (ai?.value || "").trim();
+  if (!txt || !S.ai.id) return;
+  if (ai) ai.value = "";
+
+  addMsg("aiMessages", S.name, txt, "me");
+  socket.emit("chat:message", { roomId: S.ai.id, text: txt });
+  markPrac(1, 0);
+  hintAi("Sent ✅ Waiting for AI Coach…");
+}
+
+/* ─────────────────────────────────────────────────────────
+   WIRE: UI EVENTS
+───────────────────────────────────────────────────────── */
+function wireUI() {
+
+  /* ── Name screen ──────────────────────────────────── */
+  const doJoin = () => {
+    const ne  = $("nameErr");
+    const val = ($("nameInput")?.value || "").trim();
+    if (!val) {
+      if (ne) ne.textContent = "Please enter a name.";
+      return;
+    }
+    if (ne) ne.textContent = "";
+
+    // ✅ Serverga user:register yubor — server javob bersa showScreen("main") chaqiriladi
+    const btn = $("btnJoin");
+    if (btn) { btn.disabled = true; btn.textContent = "Connecting…"; }
+
+    socket.emit("user:register", { name: val });
+  };
+  $("btnJoin")?.addEventListener("click", doJoin);
+  $("nameInput")?.addEventListener("keydown", e => { if (e.key === "Enter") doJoin(); });
+
+  /* ── Logout ───────────────────────────────────────── */
+  $("btnLogout")?.addEventListener("click", () => {
+    localStorage.removeItem(LS_NAME);
+    location.reload();
+  });
+
+  /* ── Bottom nav ───────────────────────────────────── */
+  $("navHome")?.addEventListener("click", () => setTab("home"));
+  $("navConv")?.addEventListener("click", () => setTab("conv"));
+  $("navAi")?.addEventListener("click",   () => setTab("ai"));
+
+  /* ── Home tab ─────────────────────────────────────── */
+  $("btnResetStats")?.addEventListener("click", () => {
+    S.prac = { sessions: 0, minutes: 0, days: {} };
+    savePrac(); renderStats(); renderCal();
+  });
+
+  $("calPrev")?.addEventListener("click", () => {
+    S.cal.m--;
+    if (S.cal.m < 0) { S.cal.m = 11; S.cal.y--; }
+    renderCal();
+  });
+
+  $("calNext")?.addEventListener("click", () => {
+    S.cal.m++;
+    if (S.cal.m > 11) { S.cal.m = 0; S.cal.y++; }
+    renderCal();
+  });
+
+  $("btnLb")?.addEventListener("click", () => socket.emit("admin:get", {}));
+
+  /* ── Conv: Start Conversation button ─────────────── */
+  $("btnStartConv")?.addEventListener("click", () => convState("prefs"));
+
+  /* ── Conv: Back ───────────────────────────────────── */
+  $("btnBackIdle")?.addEventListener("click", () => convState("idle"));
+
+  /* ── Conv: Gender chips ───────────────────────────── */
+  $("genderChips")?.addEventListener("click", e => {
+    const btn = e.target.closest(".chip");
+    if (!btn) return;
+    S.prefs.gender = btn.dataset.val;
+    syncChips("genderChips", S.prefs.gender);
+  });
+
+  /* ── Conv: Level chips ────────────────────────────── */
+  $("levelChips")?.addEventListener("click", e => {
+    const btn = e.target.closest(".chip");
+    if (!btn) return;
+    S.prefs.level = btn.dataset.val;
+    syncChips("levelChips", S.prefs.level);
+  });
+
+  /* ── Conv: Find match ─────────────────────────────── */
+  $("btnFind")?.addEventListener("click", () => {
+    if (S.prefs.gender === "AI") {
+      socket.emit("match:start", { gender: "AI", level: "Any" });
+      hintAi("Connecting to AI Coach…");
+      setTab("ai");
+      return;
+    }
+    hintSearch("Searching for a partner…");
+    socket.emit("match:start", { gender: S.prefs.gender, level: S.prefs.level });
+  });
+
+  $("btnStop")?.addEventListener("click", () => {
+    socket.emit("match:stop");
+    hintSearch("");
+  });
+
+  /* ── Conv: Leave room ─────────────────────────────── */
+  $("btnLeave")?.addEventListener("click", () => {
+    if (S.room.id || S.ai.id) socket.emit("room:leave");
+  });
+
+  /* ── Conv: Report partner ─────────────────────────── */
+  $("btnReport")?.addEventListener("click", () => {
+    if (!S.room.id) return;
+    socket.emit("report:partner", { roomId: S.room.id });
+  });
+
+  /* ── Conv: Human send ─────────────────────────────── */
+  $("btnSend")?.addEventListener("click", sendHuman);
+  $("msgInput")?.addEventListener("keydown", e => { if (e.key === "Enter") sendHuman(); });
+
+  /* ── Conv: Rating stars ───────────────────────────── */
+  document.querySelectorAll(".rate-star").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (!S.room.id) return;
+      const stars = clamp(Number(btn.dataset.r), 1, 5);
+      document.querySelectorAll(".rate-star")
+        .forEach(b => b.classList.toggle("picked", Number(b.dataset.r) === stars));
+      socket.emit("rate:partner", { roomId: S.room.id, stars });
+    });
+  });
+
+  /* ── Conv: Icebreaker navigation ──────────────────── */
+  $("qPrev")?.addEventListener("click", () => {
+    if (S.room.id) socket.emit("icebreaker:nav", { roomId: S.room.id, dir: "prev" });
+  });
+  $("qNext")?.addEventListener("click", () => {
+    if (S.room.id) socket.emit("icebreaker:nav", { roomId: S.room.id, dir: "next" });
+  });
+
+  /* ── Conv: Voice On/Off ───────────────────────────── */
+  $("btnVoice")?.addEventListener("click", async () => {
+    if (!S.room.id) { hintVoice("Join a room first."); return; }
+    await warmAudio();
+    if (!S.voiceOn) await startVoice();
+    else            await stopVoice();
+  });
+
+  /* ── AI tab: Start AI ─────────────────────────────── */
+  $("btnAiStart")?.addEventListener("click", () => {
+    if (S.ai.id) { hintAi("AI session already active."); return; }
+    socket.emit("match:start", { gender: "AI", level: "Any" });
+    hintAi("Connecting to AI Coach…");
+  });
+
+  /* ── AI tab: Voice On/Off ─────────────────────────── */
+  $("btnAiVoice")?.addEventListener("click", async () => {
+    if (!S.ai.id) { hintAi("Press <strong>Start AI</strong> first."); return; }
+    if (!S.aiListening) startAiMic();
+    else                await stopAiMicAndSend();
+    setAiVoiceBtn();
+  });
+
+  /* ── AI tab: Finish session ───────────────────────── */
+  $("btnAiLeave")?.addEventListener("click", () => {
+    if (!S.ai.id) { resetAi(); return; }
+    stopAiMic();
+    socket.emit("room:leave");
+  });
+
+  /* ── AI tab: Typed message ────────────────────────── */
+  $("btnAiSend")?.addEventListener("click", sendAi);
+  $("aiInput")?.addEventListener("keydown", e => { if (e.key === "Enter") sendAi(); });
+}
+
+/* ─────────────────────────────────────────────────────────
+   WIRE: SOCKET EVENTS  ✅ ENABLED
+───────────────────────────────────────────────────────── */
+function wireSocket() {
+
+  /* ── Questions from server ────────────────────────── */
+  socket.on("global:questions", ({ questions }) => {
+    S.questions = Array.isArray(questions) ? questions.slice(0, 10) : [];
+    while (S.questions.length < 10) S.questions.push("Tell me something interesting about you.");
+    renderQ();
+  });
+
+  /* ── Live stats ───────────────────────────────────── */
+  socket.on("global:stats", ({ online, waiting, rooms }) => {
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? 0); };
+    set("statOnline",  online);
+    set("statWaiting", waiting);
+    set("statRooms",   rooms);
+    const oc = $("onlineCount");
+    if (oc) oc.textContent = String(online ?? 0);
+  });
+
+  /* ── Admin snapshot ───────────────────────────────── */
+  socket.on("admin:snapshot", snap => {
+    if (snap?.leaderboard)               renderLb(snap.leaderboard);
+    if (Array.isArray(snap?.onlineUsers)) renderOnline(snap.onlineUsers);
+  });
+
+  /* ── Register success ─────────────────────────────── */
+  socket.on("user:register:ok", ({ user, aiScore }) => {
+    // Reset button
+    const btn = $("btnJoin");
+    if (btn) { btn.disabled = false; btn.textContent = "Continue →"; }
+
+    S.name = user.name;
+    localStorage.setItem(LS_NAME, user.name);
+
+    const mn = $("meName"); if (mn) mn.textContent = user.name;
+    if (aiScore) renderScore(aiScore);
+
+    showScreen("main");
+    resetConv();
+    resetAi();
+    renderStats();
+    renderCal();
+    syncChips("genderChips", S.prefs.gender);
+    syncChips("levelChips",  S.prefs.level);
+
+    setTab("conv");
+    convState("idle");
+  });
+
+  /* ── Register fail ────────────────────────────────── */
+  socket.on("user:register:fail", ({ reason }) => {
+    const btn = $("btnJoin");
+    if (btn) { btn.disabled = false; btn.textContent = "Continue →"; }
+
+    if (reason === "banned") { showScreen("banned"); return; }
+
+    const ne = $("nameErr");
+    if (!ne) return;
+
+    if (reason === "name_taken") {
+      ne.textContent = "This name is already in use. Choose a different name.";
+    } else {
+      ne.textContent = "Invalid name. Please try something else.";
+    }
+  });
+
+  /* ── Kicked ───────────────────────────────────────── */
+  socket.on("user:kicked", () => {
+    localStorage.removeItem(LS_NAME);
+    location.reload();
+  });
+
+  /* ── Banned mid-session ───────────────────────────── */
+  socket.on("user:banned", () => showScreen("banned"));
+
+  /* ── Searching ────────────────────────────────────── */
+  socket.on("match:searching", () => hintSearch("Searching for a partner…"));
+
+  /* ── Match found ──────────────────────────────────── */
+  socket.on("match:found", async ({ roomId, partnerName, aiScore }) => {
+    if (aiScore) renderScore(aiScore);
+
+    if (partnerName === "AI") {
+      S.ai.id = roomId;
+      sessionStart("ai");
+
+      const am = $("aiMessages"); if (am) am.innerHTML = "";
+      const ar = $("aiReport");   if (ar) ar.style.display = "none";
+
+      addMsg("aiMessages", "System", "Connected to AI Coach. Ask anything or use voice.", "sys");
+      hintAi("AI ready ✅ Voice On → speak → Voice Off → AI replies by voice.");
+      setAiVoiceBtn();
+      setTab("ai");
+      return;
+    }
+
+    S.room.id      = roomId;
+    S.room.partner = partnerName;
+    S.room.polite  = (S.name || "").localeCompare(partnerName || "") < 0;
+    sessionStart("human");
+
+    const pn = $("partnerName"); if (pn) pn.textContent = partnerName;
+    const pa = $("pAvatar");     if (pa) pa.textContent = (partnerName || "?")[0].toUpperCase();
+    const msgs = $("messages");  if (msgs) msgs.innerHTML = "";
+
+    hintSearch("");
+    convState("chat");
+    setTab("conv");
+
+    addMsg("messages", "System", `Connected with ${partnerName}. Say hello!`, "sys");
+    hintVoice("Press Voice On to speak. Your partner will hear you immediately.");
+
+    if (!S.pc) buildPeer();
+    await warmAudio();
+  });
+
+  /* ── Icebreaker ───────────────────────────────────── */
+  socket.on("icebreaker:set", ({ index }) => {
+    S.qIdx = Number(index) || 0;
+    renderQ();
+  });
+
+  /* ── Chat message ─────────────────────────────────── */
+  socket.on("chat:message", async msg => {
+    if (!msg?.from) return;
+
+    if (S.ai.id && msg.from === "AI") {
+      addMsg("aiMessages", "AI Coach", msg.text);
+      await aiSpeak(msg.text);
+      return;
+    }
+
+    if (S.room.id && msg.from !== "AI") {
+      const isMe = msg.from === S.name;
+      addMsg("messages", msg.from, msg.text, isMe ? "me" : "");
+    }
+  });
+
+  /* ── Report / Rate ────────────────────────────────── */
+  socket.on("report:ok", ({ reported }) =>
+    addMsg("messages", "System", `Reported: ${reported || "ok"}`, "sys"));
+
+  socket.on("rate:ok", ({ rated }) =>
+    addMsg("messages", "System", `Rated: ${rated || "ok"}`, "sys"));
+
+  /* ── Room ended ───────────────────────────────────── */
+  socket.on("room:ended", ({ reason }) => {
+    if (S.room.id) {
+      sessionEnd("human");
+      addMsg("messages", "System", `Conversation ended${reason ? " (" + reason + ")" : ""}.`, "sys");
+      setTimeout(() => resetConv(), 1800);
+    }
+    if (S.ai.id) {
+      sessionEnd("ai");
+      addMsg("aiMessages", "System", "AI session ended.", "sys");
+      S.ai.id = null;
+      stopAiMic();
+      setAiVoiceBtn();
+      hintAi("Session ended. Press <strong>Start AI</strong> to begin a new session.");
+    }
+  });
+
+  /* ── AI Coach report ──────────────────────────────── */
+  socket.on("coach:report", ({ report, aiScore }) => {
+    if (aiScore) renderScore(aiScore);
+
+    const rc = $("aiReport"); if (rc) rc.style.display = "block";
+    const rs = $("rSummary"); if (rs) rs.textContent = report?.summary || "Report received.";
+
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? "—"); };
+    set("rBand", report?.band);
+    set("rFlu",  report?.fluency);
+    set("rGra",  report?.grammar);
+    set("rVoc",  report?.vocab);
+    set("rPro",  report?.pronunciation);
+
+    const fl = $("rFixes");
+    if (fl) {
+      fl.innerHTML = "";
+      (Array.isArray(report?.fixes) ? report.fixes : []).forEach(x => {
+        const li = document.createElement("li"); li.textContent = x; fl.appendChild(li);
+      });
+    }
+
+    const sl = $("rSteps");
+    if (sl) {
+      sl.innerHTML = "";
+      (Array.isArray(report?.next_steps) ? report.next_steps : []).forEach(x => {
+        const li = document.createElement("li"); li.textContent = x; sl.appendChild(li);
+      });
+    }
+
+    sessionEnd("ai");
+    S.ai.id = null;
+    stopAiMic();
+    setAiVoiceBtn();
+    hintAi("✅ Session finished! Your report is below.");
+
+    const ar = $("aiReport");
+    if (ar) setTimeout(() => ar.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+  });
+
+  /* ── WebRTC signaling ─────────────────────────────── */
+  socket.on("webrtc:offer",  async ({ sdp, from }) => handleOffer(sdp, from));
+  socket.on("webrtc:answer", async ({ sdp }) => {
+    if (!S.pc) return;
+    try { await S.pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch (_) {}
+  });
+  socket.on("webrtc:ice", async ({ candidate }) => {
+    if (!S.pc) return;
+    try { await S.pc.addIceCandidate(candidate); } catch (_) {}
+  });
+
+  /* ── Connection status ────────────────────────────── */
+  socket.on("connect",    () => {
+    netBadge("");
+    // ✅ Reconnect bo'lganda ham ro'yxatdan o'tish
+    const stored = (localStorage.getItem(LS_NAME) || "").trim();
+    if (stored && !S.name) {
+      socket.emit("user:register", { name: stored });
+    } else if (S.name) {
+      socket.emit("user:register", { name: S.name });
+    }
+  });
+  socket.on("disconnect", () => {
+    netBadge("Offline… reconnecting");
+    if (S.aiListening) stopAiMic();
+  });
+  socket.on("connect_error", () => netBadge("Connection error…"));
+}
+
+/* ─────────────────────────────────────────────────────────
+   GLOBAL EVENTS
+───────────────────────────────────────────────────────── */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && S.aiListening) stopAiMic();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && S.aiListening) {
+    stopAiMic();
+    hintAi("Mic stopped (tab hidden).");
+  }
+});
+
+window.addEventListener("offline", () => netBadge("Offline"));
+window.addEventListener("online",  () => netBadge(""));
+
+/* ─────────────────────────────────────────────────────────
+   BOOT
+───────────────────────────────────────────────────────── */
+(async function boot() {
+
+  /* 1. Load saved practice data */
+  loadPrac();
+
+  /* 2. Wire all UI + socket events */
+  wireUI();
+  wireSocket(); // ✅ YOQILDI
+
+  /* 3. Render initial local data */
+  renderStats();
+  renderCal();
+  renderQ();
+
+  /* 4. Sync chips */
+  syncChips("genderChips", S.prefs.gender);
+  syncChips("levelChips",  S.prefs.level);
+
+  /* 5. Show Name screen by default */
+  showScreen("name");
+  convState("idle");
+
+  /* 6. Auto-login: agar nom saqlangan bo'lsa, name inputga qo'y
+        Haqiqiy login socket "connect" eventida bo'ladi */
+  const stored = (localStorage.getItem(LS_NAME) || "").trim();
+  if (stored) {
+    const ni = $("nameInput");
+    if (ni) ni.value = stored;
+    // Socket ulanganida "connect" handler user:register yuboradi
+  }
+
+})();
+</script>
 </body>
 </html>
