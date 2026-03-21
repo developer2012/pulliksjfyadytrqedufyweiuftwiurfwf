@@ -2665,33 +2665,27 @@ window.addEventListener("online",  () => netBadge(""));
 ───────────────────────────────────────────────────────── */
 (async function boot() {
 
-  /* 1. Load saved practice data */
   loadPrac();
 
-  /* 2. Wire all UI + socket events */
   wireUI();
-  wireSocket(); // ✅ YOQILDI
+  wireSocket();
 
-  /* 3. Render initial local data */
   renderStats();
   renderCal();
   renderQ();
 
-  /* 4. Sync chips */
   syncChips("genderChips", S.prefs.gender);
   syncChips("levelChips",  S.prefs.level);
 
-  /* 5. Show Name screen by default */
   showScreen("name");
   convState("idle");
 
-  /* 6. Auto-login: agar nom saqlangan bo'lsa, name inputga qo'y
-        Haqiqiy login socket "connect" eventida bo'ladi */
+  await loadRtcCfg(); // ✅ SHU QATORNI QO'SHING
+
   const stored = (localStorage.getItem(LS_NAME) || "").trim();
   if (stored) {
     const ni = $("nameInput");
     if (ni) ni.value = stored;
-    // Socket ulanganida "connect" handler user:register yuboradi
   }
 
 })();
