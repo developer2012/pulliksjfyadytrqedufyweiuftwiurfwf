@@ -2006,16 +2006,15 @@ function buildPeer() {
     if (!S.pc) return;
     const cs = S.pc.connectionState;
     if (cs === "connected")    hintVoice("Voice connected ✅");
-    if (cs === "failed")       hintVoice("Voice failed ❌ (check network / TURN required)");
+    if (cs === "failed")       hintVoice("Voice failed ❌");
     if (cs === "disconnected") hintVoice("Voice disconnected.");
   };
 
+  // ✅ Perfect Negotiation
   S.pc.onnegotiationneeded = async () => {
     try {
       S.makingOffer = true;
-      const offer = await S.pc.createOffer({ offerToReceiveAudio: true });
-      if (!S.pc || S.pc.signalingState !== "stable") return;
-      await S.pc.setLocalDescription(offer);
+      await S.pc.setLocalDescription();
       socket.emit("webrtc:offer", { roomId: S.room.id, sdp: S.pc.localDescription });
     } catch (_) {
       hintVoice("Offer error.");
@@ -2036,11 +2035,17 @@ async function handleOffer(sdp, from) {
   if (!S.room.id) return;
   if (!S.pc) buildPeer();
 
-  const collision = S.makingOffer || S.pc.signalingState !== "stable";
-  S.ignoreOffer = !S.room.polite && collision;
+  const offerCollision = sdp.type === "offer" &&
+    (S.makingOffer || S.pc.signalingState !== "stable");
+
+  S.ignoreOffer = !S.room.polite && offerCollision;
   if (S.ignoreOffer) return;
 
   try {
+    if (offerCollision && S.room.polite) {
+      await S.pc.setLocalDescription({ type: "rollback" });
+    }
+
     await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
 
     if (sdp.type === "offer") {
@@ -2051,10 +2056,12 @@ async function handleOffer(sdp, from) {
         });
       }
 
-      const ans = await S.pc.createAnswer();
-      await S.pc.setLocalDescription(ans);
+      await S.pc.setLocalDescription();
       socket.emit("webrtc:answer", { roomId: S.room.id, sdp: S.pc.localDescription });
-      hintVoice(`${esc(from)} turned on voice — you can hear them. Press Voice On to also speak.`);
+
+      if (!S.voiceOn) {
+        hintVoice(`${esc(from)} turned on voice — press Voice On to also speak.`);
+      }
     }
   } catch (_) {
     hintVoice("Voice connection error.");
