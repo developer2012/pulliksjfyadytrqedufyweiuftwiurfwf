@@ -60,7 +60,7 @@ const TRUST_PROXY = (process.env.TRUST_PROXY || "1").trim();
 const STATIC_DIR = path.join(__dirname, "public");
 
 // ✅ ENV-only secrets
-const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || "").trim();
+const ADMIN_TOKEN = "salom123"; // Must be set in ENV for admin API access
 
 // AI provider selection
 const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").trim().toLowerCase();
@@ -81,9 +81,9 @@ const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 
 // WebRTC ICE
 const STUN = (process.env.STUN_URL || "stun:stun.l.google.com:19302").trim();
-const TURN_URL = (process.env.TURN_URL || "").trim();
-const TURN_USER = (process.env.TURN_USER || "").trim();
-const TURN_PASS = (process.env.TURN_PASS || "").trim();
+const TURN_URL = "turn:relay.metered.ca:80"
+const TURN_USER ="b4a729fa2f17923032be306e"
+const TURN_PASS = "E9ZqX0aTVZm9qhcF"
 const FORCE_RELAY = String(process.env.FORCE_RELAY || "").toLowerCase() === "true";
 
 // Limits
