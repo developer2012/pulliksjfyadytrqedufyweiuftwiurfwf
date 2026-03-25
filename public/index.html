@@ -1308,8 +1308,7 @@ body {
           <p id="searchInfo" class="muted-text" style="margin-top:10px;" aria-live="polite"></p>
 
           <p class="muted-text" style="margin-top:8px;">
-            Selecting AI Coach takes you to the AI tab instantly. One-way voice: if you press
-            Voice On, your partner hears you even before they enable their own mic.
+            ✅ <strong>Ikki tomonlama ovoz:</strong> Xonaga kirgandan so'ng avtomatik ikkalangiz ham bir-birini eshitasiz. Ovozni o'chirish uchun tugmani bosing.
           </p>
 
         </div>
@@ -1348,7 +1347,7 @@ body {
 
           <!-- Controls: Voice + Report + Rate -->
           <div class="ctrl-row">
-            <button id="btnVoice" class="btn btn-primary" type="button">🎙️ Voice On</button>
+            <button id="btnVoice" class="btn btn-primary" type="button">🔴 Ovoz yoqilgan</button>
             <button id="btnReport" class="btn" type="button">Report</button>
             <div class="rate-group" role="group" aria-label="Rate partner 1–5">
               <button class="rate-star" data-r="1" type="button">1</button>
@@ -1380,12 +1379,7 @@ body {
           </div>
 
           <!-- Hidden audio element for remote voice -->
-          <audio id="remoteAudio" autoplay playsinline aria-hidden="true"></audio>
-
-          <p class="muted-text" style="margin-top:10px;">
-            <strong>One-way voice:</strong> pressing Voice On lets your partner hear you
-            immediately — they don't need to press Voice On to listen.
-          </p>
+          <audio id="remoteAudio" autoplay playsinline muted aria-hidden="true"></audio>
 
         </div>
       </div><!-- /convChat -->
@@ -1518,9 +1512,21 @@ body {
 
 <!-- ✅ REAL Socket.IO (serverdan keladi) -->
 <script src="/socket.io/socket.io.js"></script>
+<!-- ✅ Telegram Web App SDK -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 
 <script>
 "use strict";
+
+/* ─────────────────────────────────────────────────────────
+   ✅ Telegram detect
+───────────────────────────────────────────────────────── */
+const isTelegram = window.Telegram && window.Telegram.WebApp;
+if (isTelegram) {
+  Telegram.WebApp.ready();
+  Telegram.WebApp.expand();
+  Telegram.WebApp.enableClosingConfirmation();
+}
 
 /* ─────────────────────────────────────────────────────────
    ✅ REAL SOCKET — server bilan haqiqiy ulanish
@@ -1585,7 +1591,7 @@ const S = {
   audioWarm: false,
   pc: null,
   stream: null,
-  voiceOn: false,
+  voiceOn: true,
   makingOffer: false,
   ignoreOffer: false,
   aiListening: false,
@@ -1804,7 +1810,6 @@ function renderCal() {
 
     cell.addEventListener("click", () => {
       if (k && S.prac.days[k]) {
-        const d = S.prac.days[k];
         hintAi(`📅 ${k}: ${d.minutes} min, ${d.sessions} sessions`);
       }
     });
@@ -1936,6 +1941,7 @@ function resetConv() {
   S.room    = { id: null, partner: null, polite: false };
   S.qIdx    = 0;
   S.humanTs = 0;
+  S.voiceOn = true;
 
   renderQ();
   hintVoice("");
@@ -1981,7 +1987,7 @@ async function warmAudio() {
 }
 
 /* ─────────────────────────────────────────────────────────
-   WebRTC
+   ✅ YANGI: IKKI TOMONLAMA OVOZ WebRTC
 ───────────────────────────────────────────────────────── */
 function buildPeer() {
   destroyPeer();
@@ -1994,7 +2000,7 @@ function buildPeer() {
   S.pc.ontrack = ev => {
     const [st] = ev.streams;
     const a = $("remoteAudio");
-    if (st && a) { a.srcObject = st; a.play().catch(() => {}); }
+    if (st && a) { a.srcObject = st; a.muted = false; a.play().catch(() => {}); }
   };
 
   S.pc.onicecandidate = ev => {
@@ -2005,19 +2011,18 @@ function buildPeer() {
   S.pc.onconnectionstatechange = () => {
     if (!S.pc) return;
     const cs = S.pc.connectionState;
-    if (cs === "connected")    hintVoice("Voice connected ✅");
-    if (cs === "failed")       hintVoice("Voice failed ❌");
-    if (cs === "disconnected") hintVoice("Voice disconnected.");
+    if (cs === "connected")    hintVoice("✅ Ovoz ulandi — ikkalangiz ham bir-birini eshitasiz");
+    if (cs === "failed")       hintVoice("❌ Ovoz ulanmadi — sahifani yangilang");
+    if (cs === "disconnected") hintVoice("Ovoz uzildi");
   };
 
-  // ✅ Perfect Negotiation
   S.pc.onnegotiationneeded = async () => {
     try {
       S.makingOffer = true;
       await S.pc.setLocalDescription();
       socket.emit("webrtc:offer", { roomId: S.room.id, sdp: S.pc.localDescription });
     } catch (_) {
-      hintVoice("Offer error.");
+      hintVoice("Ulanish xatosi");
     } finally {
       S.makingOffer = false;
     }
@@ -2058,21 +2063,17 @@ async function handleOffer(sdp, from) {
 
       await S.pc.setLocalDescription();
       socket.emit("webrtc:answer", { roomId: S.room.id, sdp: S.pc.localDescription });
-
-      if (!S.voiceOn) {
-        hintVoice(`${esc(from)} turned on voice — press Voice On to also speak.`);
-      }
     }
   } catch (_) {
-    hintVoice("Voice connection error.");
+    hintVoice("Ovoz ulanish xatosi");
   }
 }
 
 async function startVoice() {
-  if (!S.room.id) { hintVoice("Join a room first."); return; }
+  if (!S.room.id) { hintVoice("Avval xonaga kiring"); return; }
   if (S.voiceOn) return;
 
-  hintVoice("Requesting microphone…");
+  hintVoice("Mikrofon ruxsati so'ralmoqda…");
 
   try {
     S.stream = await navigator.mediaDevices.getUserMedia({
@@ -2086,13 +2087,13 @@ async function startVoice() {
       video: false,
     });
   } catch (_) {
-    hintVoice("Microphone access denied. Allow mic in your browser settings.");
+    hintVoice("❌ Mikrofonga ruxsat bering!");
     return;
   }
 
   S.voiceOn = true;
   const btn = $("btnVoice");
-  if (btn) btn.innerHTML = "🔴 Voice Off";
+  if (btn) btn.innerHTML = "🔴 Ovoz yoqilgan";
 
   if (!S.pc) buildPeer();
 
@@ -2101,15 +2102,15 @@ async function startVoice() {
     if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
   });
 
-  hintVoice("Mic on ✅ Connecting voice to partner…");
+  hintVoice("✅ Ovoz yoqildi");
 }
 
 async function stopVoice() {
   S.voiceOn = false;
 
   const btn = $("btnVoice");
-  if (btn) btn.innerHTML = "🎙️ Voice On";
-  hintVoice("");
+  if (btn) btn.innerHTML = "🎙️ Ovoz o'chirilgan";
+  hintVoice("Ovoz o'chirildi");
 
   if (S.stream) {
     S.stream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
@@ -2228,7 +2229,7 @@ async function stopAiMicAndSend() {
    SEND MESSAGE HELPERS
 ───────────────────────────────────────────────────────── */
 function sendHuman() {
-  if (now() - S.lastHumanSend < S.cdMs) { hintVoice("Slow down a bit…"); return; }
+  if (now() - S.lastHumanSend < S.cdMs) { hintVoice("Biroz sekinroq…"); return; }
   S.lastHumanSend = now();
 
   const mi  = $("msgInput");
@@ -2239,7 +2240,7 @@ function sendHuman() {
 }
 
 function sendAi() {
-  if (now() - S.lastAiSend < S.cdMs) { hintAi("Slow down a bit…"); return; }
+  if (now() - S.lastAiSend < S.cdMs) { hintAi("Biroz sekinroq…"); return; }
   S.lastAiSend = now();
 
   const ai  = $("aiInput");
@@ -2268,7 +2269,6 @@ function wireUI() {
     }
     if (ne) ne.textContent = "";
 
-    // ✅ Serverga user:register yubor — server javob bersa showScreen("main") chaqiriladi
     const btn = $("btnJoin");
     if (btn) { btn.disabled = true; btn.textContent = "Connecting…"; }
 
@@ -2338,7 +2338,7 @@ function wireUI() {
       setTab("ai");
       return;
     }
-    hintSearch("Searching for a partner…");
+    hintSearch("Sherik qidirilmoqda…");
     socket.emit("match:start", { gender: S.prefs.gender, level: S.prefs.level });
   });
 
@@ -2381,12 +2381,11 @@ function wireUI() {
     if (S.room.id) socket.emit("icebreaker:nav", { roomId: S.room.id, dir: "next" });
   });
 
-  /* ── Conv: Voice On/Off ───────────────────────────── */
+  /* ── ✅ YANGI: Ovoz yoqish/o'chirish tugmasi ───────── */
   $("btnVoice")?.addEventListener("click", async () => {
-    if (!S.room.id) { hintVoice("Join a room first."); return; }
-    await warmAudio();
-    if (!S.voiceOn) await startVoice();
-    else            await stopVoice();
+    if (!S.room.id) { hintVoice("Avval xonaga kiring"); return; }
+    if (S.voiceOn)  await stopVoice();
+    else            await startVoice();
   });
 
   /* ── AI tab: Start AI ─────────────────────────────── */
@@ -2417,7 +2416,7 @@ function wireUI() {
 }
 
 /* ─────────────────────────────────────────────────────────
-   WIRE: SOCKET EVENTS  ✅ ENABLED
+   WIRE: SOCKET EVENTS
 ───────────────────────────────────────────────────────── */
 function wireSocket() {
 
@@ -2446,7 +2445,6 @@ function wireSocket() {
 
   /* ── Register success ─────────────────────────────── */
   socket.on("user:register:ok", ({ user, aiScore }) => {
-    // Reset button
     const btn = $("btnJoin");
     if (btn) { btn.disabled = false; btn.textContent = "Continue →"; }
 
@@ -2466,6 +2464,14 @@ function wireSocket() {
 
     setTab("conv");
     convState("idle");
+
+    // ✅ Telegram dan kelsa avtomatik ovoz ruxsatini oldindan ol
+    if (isTelegram) {
+      setTimeout(async () => {
+        await warmAudio();
+        try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch(_) {}
+      }, 1000);
+    }
   });
 
   /* ── Register fail ────────────────────────────────── */
@@ -2495,9 +2501,9 @@ function wireSocket() {
   socket.on("user:banned", () => showScreen("banned"));
 
   /* ── Searching ────────────────────────────────────── */
-  socket.on("match:searching", () => hintSearch("Searching for a partner…"));
+  socket.on("match:searching", () => hintSearch("Sherik qidirilmoqda…"));
 
-  /* ── Match found ──────────────────────────────────── */
+  /* ── ✅ YANGI: Xonaga kirganda avtomatik ovoz yoqish ── */
   socket.on("match:found", async ({ roomId, partnerName, aiScore }) => {
     if (aiScore) renderScore(aiScore);
 
@@ -2518,6 +2524,7 @@ function wireSocket() {
     S.room.id      = roomId;
     S.room.partner = partnerName;
     S.room.polite  = (S.name || "").localeCompare(partnerName || "") < 0;
+    S.voiceOn      = true;
     sessionStart("human");
 
     const pn = $("partnerName"); if (pn) pn.textContent = partnerName;
@@ -2528,11 +2535,27 @@ function wireSocket() {
     convState("chat");
     setTab("conv");
 
-    addMsg("messages", "System", `Connected with ${partnerName}. Say hello!`, "sys");
-    hintVoice("Press Voice On to speak. Your partner will hear you immediately.");
+    addMsg("messages", "System", `Ulandi: ${partnerName}`, "sys");
+    hintVoice("✅ Ovoz ulanmoqda…");
 
     if (!S.pc) buildPeer();
     await warmAudio();
+
+    // ✅ Avtomatik mikrofonni yoq
+    try {
+      S.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+
+      const senders = S.pc.getSenders();
+      S.stream.getTracks().forEach(t => {
+        if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
+      });
+
+      hintVoice("✅ Ovoz ulandi! Endi gaplashishingiz mumkin");
+    } catch(e) {
+      hintVoice("⚠️ Mikrofonga ruxsat bering — " + e.message);
+    }
   });
 
   /* ── Icebreaker ───────────────────────────────────── */
@@ -2568,7 +2591,7 @@ function wireSocket() {
   socket.on("room:ended", ({ reason }) => {
     if (S.room.id) {
       sessionEnd("human");
-      addMsg("messages", "System", `Conversation ended${reason ? " (" + reason + ")" : ""}.`, "sys");
+      addMsg("messages", "System", `Suhat tugadi${reason ? " (" + reason + ")" : ""}.`, "sys");
       setTimeout(() => resetConv(), 1800);
     }
     if (S.ai.id) {
@@ -2635,7 +2658,6 @@ function wireSocket() {
   /* ── Connection status ────────────────────────────── */
   socket.on("connect",    () => {
     netBadge("");
-    // ✅ Reconnect bo'lganda ham ro'yxatdan o'tish
     const stored = (localStorage.getItem(LS_NAME) || "").trim();
     if (stored && !S.name) {
       socket.emit("user:register", { name: stored });
@@ -2687,7 +2709,7 @@ window.addEventListener("online",  () => netBadge(""));
   showScreen("name");
   convState("idle");
 
-  await loadRtcCfg(); // ✅ SHU QATORNI QO'SHING
+  await loadRtcCfg();
 
   const stored = (localStorage.getItem(LS_NAME) || "").trim();
   if (stored) {
