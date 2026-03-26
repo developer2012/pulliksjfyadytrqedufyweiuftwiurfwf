@@ -735,15 +735,12 @@ body{font-family:var(--fb);background:var(--bg);color:var(--tx);line-height:1.5;
 <script src="/socket.io/socket.io.js"></script>
 <script>
 "use strict";
-
 const socket = io({ transports: ["websocket","polling"], reconnectionAttempts: 10, reconnectionDelay: 1500 });
 
 /* ── DOM helpers ──────────────────────────────────────── */
-const $      = id => document.getElementById(id);
-const now    = () => Date.now();
-const clamp  = (v, a, b) => Math.max(a, Math.min(b, +v || 0));
-
-function show(el, vis, as = "") { if (el) el.style.display = vis ? (as || "") : "none"; }
+const $ = id => document.getElementById(id);
+const now = () => Date.now();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, +v || 0));
 
 function esc(s) {
   return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
@@ -758,44 +755,42 @@ function addMsg(boxId, from, text, kind = "") {
   box.scrollTop = box.scrollHeight;
 }
 
-/* ── LS keys ──────────────────────────────────────────── */
-const LS_NAME    = "wt_name_v6";
-const LS_GENDER  = "wt_gender_v6";
-const LS_LEVEL   = "wt_level_v6";
-const LS_PRAC    = "wt_prac_v5";
+/* ── LS keys va boshqa state'larni saqlab qoldim (qisqartirmayman) ── */
+const LS_NAME = "wt_name_v6";
+const LS_GENDER = "wt_gender_v6";
+const LS_LEVEL = "wt_level_v6";
+const LS_PRAC = "wt_prac_v5";
 
 /* ── App State ────────────────────────────────────────── */
 const S = {
-  name      : "",
-  myGender  : "Male",
-  myLevel   : "Beginner",
-  prefs     : { gender: "Any", level: "Any" },
-  room      : { id: null, partner: null, partnerGender: null, partnerLevel: null, polite: false },
-  ai        : { id: null },
+  name : "",
+  myGender : "Male",
+  myLevel : "Beginner",
+  prefs : { gender: "Any", level: "Any" },
+  room : { id: null, partner: null, partnerGender: null, partnerLevel: null, polite: false },
+  ai : { id: null },
   questions : [],
-  qIdx      : 0,
+  qIdx : 0,
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   forceRelay: false,
   audioWarm : false,
-  pc        : null,
-  stream    : null,
-  voiceOn   : false,
+  pc : null,
+  stream : null,
+  voiceOn : false,
   makingOffer: false,
-  ignoreOffer: false,
   aiListening: false,
   aiSpeaking : false,
   aiLastText : "",
-  aiRec      : null,
+  aiRec : null,
   aiAutoStop : null,
-  prac       : { sessions: 0, minutes: 0, days: {} },
-  cal        : { y: new Date().getFullYear(), m: new Date().getMonth() },
-  humanTs    : 0,
-  aiTs       : 0,
+  prac : { sessions: 0, minutes: 0, days: {} },
+  cal : { y: new Date().getFullYear(), m: new Date().getMonth() },
+  humanTs : 0,
+  aiTs : 0,
   lastHumanSend: 0,
-  lastAiSend   : 0,
-  cdMs         : 450,
+  lastAiSend : 0,
+  cdMs : 450,
 };
-
 /* ── Screen management ────────────────────────────────── */
 function showScreen(name) {
   $("sName").style.display  = name === "name"   ? "grid"  : "none";
@@ -1045,75 +1040,151 @@ async function warmAudio() {
 /* ── WebRTC ───────────────────────────────────────────── */
 function buildPeer() {
   destroyPeer();
-  S.pc = new RTCPeerConnection({ iceServers: S.iceServers, iceTransportPolicy: S.forceRelay ? "relay" : "all" });
+  S.pc = new RTCPeerConnection({
+    iceServers: S.iceServers,
+    iceTransportPolicy: S.forceRelay ? "relay" : "all"
+  });
+
   S.pc.ontrack = ev => {
-    const [st] = ev.streams; const a = $("remoteAudio");
-    if (st && a) { a.srcObject = st; a.play().catch(() => {}); }
+    const [st] = ev.streams;
+    const a = $("remoteAudio");
+    if (st && a) {
+      a.srcObject = st;
+      a.play().catch(() => {});
+      hintVoice("Remote audio received ✅");
+    }
   };
-  S.pc.onicecandidate = ev => { if (ev.candidate && S.room.id) socket.emit("webrtc:ice", { roomId: S.room.id, candidate: ev.candidate }); };
+
+  S.pc.onicecandidate = ev => {
+    if (ev.candidate && S.room.id) {
+      socket.emit("webrtc:ice", { roomId: S.room.id, candidate: ev.candidate });
+    }
+  };
+
   S.pc.onconnectionstatechange = () => {
     if (!S.pc) return;
     const cs = S.pc.connectionState;
-    if (cs === "connected")    hintVoice("Voice connected ✅");
-    if (cs === "failed")       hintVoice("Voice failed ❌");
+    if (cs === "connected") hintVoice("Voice connected both ways ✅");
+    if (cs === "failed") hintVoice("Voice connection failed ❌ Try turning Voice Off/On");
     if (cs === "disconnected") hintVoice("Voice disconnected.");
   };
+
   S.pc.onnegotiationneeded = async () => {
     try {
+      if (S.makingOffer) return;
       S.makingOffer = true;
       await S.pc.setLocalDescription();
-      socket.emit("webrtc:offer", { roomId: S.room.id, sdp: S.pc.localDescription });
-    } catch { hintVoice("Offer error."); } finally { S.makingOffer = false; }
+      socket.emit("webrtc:offer", {
+        roomId: S.room.id,
+        sdp: S.pc.localDescription
+      });
+    } catch (err) {
+      console.error("Negotiation error:", err);
+      hintVoice("Offer creation error.");
+    } finally {
+      S.makingOffer = false;
+    }
   };
 }
+
 function destroyPeer() {
   if (!S.pc) return;
-  try { S.pc.ontrack = null; S.pc.onicecandidate = null; S.pc.onnegotiationneeded = null; } catch {}
   try { S.pc.close(); } catch {}
   S.pc = null;
 }
+
 async function handleOffer(sdp, from) {
   if (!S.room.id) return;
   if (!S.pc) buildPeer();
-  const collision  = sdp.type === "offer" && (S.makingOffer || S.pc.signalingState !== "stable");
-  S.ignoreOffer = !S.room.polite && collision;
-  if (S.ignoreOffer) return;
+
+  const collision = sdp.type === "offer" && (S.makingOffer || S.pc.signalingState !== "stable");
+  const polite = S.room.polite;
+
+  if (collision && !polite) {
+    hintVoice("Negotiation collision — waiting...");
+    return;
+  }
+
   try {
-    if (collision && S.room.polite) await S.pc.setLocalDescription({ type: "rollback" });
+    if (collision && polite) {
+      await S.pc.setLocalDescription({ type: "rollback" });
+    }
+
     await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
     if (sdp.type === "offer") {
       if (S.stream && S.voiceOn) {
         const senders = S.pc.getSenders();
-        S.stream.getTracks().forEach(t => { if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream); });
+        S.stream.getTracks().forEach(track => {
+          if (!senders.some(s => s.track === track)) {
+            S.pc.addTrack(track, S.stream);
+          }
+        });
       }
       await S.pc.setLocalDescription();
-      socket.emit("webrtc:answer", { roomId: S.room.id, sdp: S.pc.localDescription });
-      if (!S.voiceOn) hintVoice(`${esc(from)} turned on voice — press Voice On to also speak.`);
+      socket.emit("webrtc:answer", {
+        roomId: S.room.id,
+        sdp: S.pc.localDescription
+      });
     }
-  } catch { hintVoice("Voice connection error."); }
+  } catch (err) {
+    console.error("Handle offer error:", err);
+    hintVoice("Voice negotiation failed. Try Voice Off then On again.");
+  }
 }
 async function startVoice() {
   if (!S.room.id || S.voiceOn) return;
   hintVoice("Requesting microphone…");
+
   try {
-    S.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true, channelCount:1, sampleRate:48000 }, video:false });
-  } catch { hintVoice("Microphone access denied. Allow mic in your browser settings."); return; }
+    S.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000
+      },
+      video: false
+    });
+  } catch (err) {
+    hintVoice("Microphone access denied or not available.");
+    console.error(err);
+    return;
+  }
+
   S.voiceOn = true;
-  const btn = $("btnVoice"); if (btn) btn.innerHTML = "🔴 Voice Off";
+  const btn = $("btnVoice");
+  if (btn) btn.innerHTML = "🔴 Voice Off";
+
   if (!S.pc) buildPeer();
+
+  // Tracklarni qo‘shish (renegotiationni trigger qiladi)
   const senders = S.pc.getSenders();
-  S.stream.getTracks().forEach(t => { if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream); });
-  hintVoice("Mic on ✅ Connecting voice to partner…");
+  S.stream.getTracks().forEach(track => {
+    if (!senders.some(sender => sender.track === track)) {
+      S.pc.addTrack(track, S.stream);
+    }
+  });
+
+  hintVoice("Mic activated ✅ Renegotiating... Both sides should hear each other now.");
 }
 async function stopVoice() {
   S.voiceOn = false;
-  const btn = $("btnVoice"); if (btn) btn.innerHTML = "🎙️ Voice On";
-  hintVoice("");
-  if (S.stream) { S.stream.getTracks().forEach(t => { try { t.stop(); } catch {} }); S.stream = null; }
-  destroyPeer();
-  const a = $("remoteAudio"); if (a) a.srcObject = null;
-}
+  const btn = $("btnVoice");
+  if (btn) btn.innerHTML = "🎙️ Voice On";
 
+  hintVoice("");
+
+  if (S.stream) {
+    S.stream.getTracks().forEach(t => { try { t.stop(); } catch {} });
+    S.stream = null;
+  }
+
+  destroyPeer();
+  const a = $("remoteAudio");
+  if (a) a.srcObject = null;
+}
 /* ── AI Voice ─────────────────────────────────────────── */
 const SR   = window.SpeechRecognition || window.webkitSpeechRecognition;
 const aiOk = () => !!SR && !!window.speechSynthesis;
@@ -1514,12 +1585,10 @@ window.addEventListener("online",  () => netBadge(""));
 ══════════════════════════════════════════════════════════ */
 (async function boot() {
   loadPrac();
-
-  // Restore saved profile
   const storedGender = localStorage.getItem(LS_GENDER);
-  const storedLevel  = localStorage.getItem(LS_LEVEL);
+  const storedLevel = localStorage.getItem(LS_LEVEL);
   if (storedGender && (storedGender === "Male" || storedGender === "Female")) S.myGender = storedGender;
-  if (storedLevel)  S.myLevel = storedLevel;
+  if (storedLevel) S.myLevel = storedLevel;
 
   const storedName = (localStorage.getItem(LS_NAME) || "").trim();
   if (storedName) { const ni = $("nameInput"); if (ni) ni.value = storedName; }
@@ -1529,15 +1598,13 @@ window.addEventListener("online",  () => netBadge(""));
   renderStats();
   renderCal();
   renderQ();
-
   syncChips("myGenderChips", S.myGender);
-  syncChips("myLevelChips",  S.myLevel);
-  syncChips("genderChips",   S.prefs.gender);
-  syncChips("levelChips",    S.prefs.level);
+  syncChips("myLevelChips", S.myLevel);
+  syncChips("genderChips", S.prefs.gender);
+  syncChips("levelChips", S.prefs.level);
 
   showScreen("name");
   convState("idle");
-
   await loadRtcCfg();
 })();
 </script>
