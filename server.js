@@ -46,8 +46,8 @@ const GEMINI_BASE    = (process.env.GEMINI_BASE    || "https://generativelanguag
 const GEMINI_MODEL   = (process.env.GEMINI_MODEL   || "gemini-2.5-flash").trim();
 
 // WebRTC
-const TURN_USER   = process.env.TURN_USER  || "b4a729fa2f17923032be306e";
-const TURN_PASS   = process.env.TURN_PASS  || "E9ZqX0aTVZm9qhcF";
+const TURN_USER   = "b4a729fa2f17923032be306e";
+const TURN_PASS   = "E9ZqX0aTVZm9qhcF";
 const FORCE_RELAY = String(process.env.FORCE_RELAY || "").toLowerCase() === "true";
 
 // Limits
