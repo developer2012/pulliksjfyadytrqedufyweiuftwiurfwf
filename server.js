@@ -33,7 +33,7 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "salom123";
 
 // AI
 const AI_PROVIDER  = (process.env.AI_PROVIDER || "groq").trim().toLowerCase();
-const GROQ_API_KEY = "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";
+const GROQ_API_KEY = "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";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const GROQ_MODEL   = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
