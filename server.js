@@ -1,6 +1,6 @@
 // server.js — WonderTalk PRO
 // ============================================================================
-// KEY FIXES:
+// KEY FIXES: 
 //   ✅ myGender/myLevel  = user's OWN gender & level  (set at register)
 //   ✅ wantGender/wantLevel = partner preference       (set at match:start)
 //   ✅ samePrefs() cross-check: male→female ↔ female→male
