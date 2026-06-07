@@ -1,1248 +1,807 @@
-// ============================================================
-//  WonderTalk — app.js
-//  Fully matches index.html IDs & style.css classes
-// ============================================================
+/* ═══════════════════════════════════════════════════════════════
+   Speaking Zone Bot — app.js
+   Features:
+   • Socket.io connection management
+   • Human-to-human WebRTC voice with dual mute controls
+     - Mic mute   : disables your outgoing audio track
+     - Remote mute: silences the other person's audio locally
+   • AI (SpeakBot) chat with inline AQ score parsing
+   • IELTS report on session end
+   • Glassmorphism UI interactions
+═══════════════════════════════════════════════════════════════ */
 "use strict";
 
-/* ─────────────────────────────────────────────────────────
-   SOCKET
-───────────────────────────────────────────────────────── */
-const socket = io();
+/* ── DOM helpers ─────────────────────────────────────────── */
+const $  = id => document.getElementById(id);
+const $$ = sel => document.querySelectorAll(sel);
 
-/* ─────────────────────────────────────────────────────────
-   DOM HELPERS
-───────────────────────────────────────────────────────── */
-const $   = id  => document.getElementById(id);
-const qs  = sel => document.querySelector(sel);
-const now = ()  => Date.now();
-const clamp = (v, a, b) => Math.max(a, Math.min(b, +v || 0));
-
-/** Safely show/hide an element via display style */
-function show(el, visible, as = "") {
-  if (!el) return;
-  el.style.display = visible ? (as || "") : "none";
-}
-
-/** HTML-escape a value */
-function esc(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-/**
- * Append a chat bubble to a message container.
- * kind: "me" | "sys" | "" (partner)
- */
-function addMsg(boxId, from, text, kind = "") {
-  const box = $(boxId);
-  if (!box) return;
-  const wrap = document.createElement("div");
-  wrap.className = "msg-item" + (kind ? " " + kind : "");
-  wrap.innerHTML =
-    `<div class="msg-from">${esc(from)}</div>` +
-    `<div class="msg-bubble">${esc(text)}</div>`;
-  box.appendChild(wrap);
-  box.scrollTop = box.scrollHeight;
-}
-
-/* ─────────────────────────────────────────────────────────
-   LOCAL STORAGE KEYS
-───────────────────────────────────────────────────────── */
-const LS_NAME = "wt_name_v5";
-const LS_PRAC = "wt_prac_v5";
-
-/* ─────────────────────────────────────────────────────────
-   APP STATE
-───────────────────────────────────────────────────────── */
+/* ── State ───────────────────────────────────────────────── */
 const S = {
-  /* user */
-  name: "",
-
-  /* matching preferences */
-  prefs: { gender: "Any", level: "Any" },
-
-  /* human room */
-  room: {
-    id: null,
-    partner: null,
-    polite: false,   // perfect-negotiation role
-  },
-
-  /* ai room */
-  ai: { id: null },
-
-  /* questions from server */
-  questions: [],
-  qIdx: 0,
-
-  /* WebRTC */
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-  forceRelay: false,
-  audioWarm:  false,
-  pc:         null,
-  stream:     null,      // local microphone stream
-  voiceOn:    false,
-  makingOffer:  false,
-  ignoreOffer:  false,
-
-  /* AI voice (SpeechRecognition + TTS) */
-  aiListening:  false,
-  aiSpeaking:   false,
-  aiLastText:   "",
-  aiRec:        null,
-  aiAutoStop:   null,
-
-  /* practice data */
-  prac: { sessions: 0, minutes: 0, days: {} },
-  cal:  { y: new Date().getFullYear(), m: new Date().getMonth() },
-
-  /* session timing */
-  humanTs: 0,
-  aiTs:    0,
-
-  /* send cooldown */
-  lastHumanSend: 0,
-  lastAiSend:    0,
-  cdMs: 450,
+  socket        : null,
+  name          : "",
+  myGender      : "Male",
+  myLevel       : "Intermediate",
+  aiScore       : null,
+  roomId        : null,
+  isAiRoom      : false,
+  partnerName   : "",
+  questions     : [],
+  qIndex        : 0,
+  // WebRTC
+  pc            : null,
+  localStream   : null,
+  micMuted      : false,
+  remoteMuted   : false,
+  partnerMuted  : false,  // partner's self-mute state (from socket)
+  voiceActive   : false,
+  // Rating
+  pendingRoomId : null,
+  pendingStars  : 0,
 };
 
-/* ─────────────────────────────────────────────────────────
-   SCREEN MANAGEMENT
-   Three top-level screens: name / banned / main
-───────────────────────────────────────────────────────── */
-function showScreen(name) {
-  $("sName").style.display   = name === "name"   ? "grid"  : "none";
-  $("sBanned").style.display = name === "banned" ? "grid"  : "none";
-  $("sMain").style.display   = name === "main"   ? "block" : "none";
+/* ═══════════════════════════════════════════════════════════
+   TOAST
+═══════════════════════════════════════════════════════════ */
+function toast(msg, type = "", duration = 3500) {
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  $("toast-container").appendChild(el);
+  setTimeout(() => el.remove(), duration);
 }
 
-/* ─────────────────────────────────────────────────────────
-   TAB SYSTEM  (Home / Conversation / AI Coach)
-───────────────────────────────────────────────────────── */
-function setTab(tab) {
-  /* stop AI mic when leaving AI tab */
-  if (tab !== "ai" && S.aiListening) {
-    stopAiMic();
-    hintAi("Mic stopped (tab changed).");
-  }
-
-  $("tabHome").style.display = tab === "home" ? "block" : "none";
-  $("tabConv").style.display = tab === "conv" ? "block" : "none";
-  $("tabAi").style.display   = tab === "ai"   ? "block" : "none";
-
-  ["navHome", "navConv", "navAi"].forEach(id => $(id)?.classList.remove("active"));
-  const navMap = { home: "navHome", conv: "navConv", ai: "navAi" };
-  $(navMap[tab])?.classList.add("active");
+/* ═══════════════════════════════════════════════════════════
+   SCREEN SWITCH
+═══════════════════════════════════════════════════════════ */
+function showScreen(id) {
+  $$(".screen").forEach(s => s.classList.remove("active"));
+  $(id).classList.add("active");
 }
 
-/* ─────────────────────────────────────────────────────────
-   CONVERSATION SUB-STATES  (idle / prefs / chat)
-───────────────────────────────────────────────────────── */
-function convState(s) {
-  $("convIdle").style.display  = s === "idle"  ? "block" : "none";
-  $("convPrefs").style.display = s === "prefs" ? "block" : "none";
-  $("convChat").style.display  = s === "chat"  ? "block" : "none";
-}
+/* ═══════════════════════════════════════════════════════════
+   TAB NAVIGATION
+═══════════════════════════════════════════════════════════ */
+$$(".nav-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    $$(".nav-btn").forEach(b => b.classList.remove("active"));
+    $$(".tab-content").forEach(t => t.classList.remove("active"));
+    btn.classList.add("active");
+    $(`tab-${btn.dataset.tab}`).classList.add("active");
+  });
+});
 
-/* ─────────────────────────────────────────────────────────
-   HINT HELPERS
-───────────────────────────────────────────────────────── */
-function hintVoice(txt) {
-  const el = $("voiceHint");
-  if (!el) return;
-  el.textContent    = txt || "";
-  el.style.display  = txt ? "block" : "none";
-}
+/* ═══════════════════════════════════════════════════════════
+   ENTRY SCREEN
+═══════════════════════════════════════════════════════════ */
+$("btn-enter").addEventListener("click", () => {
+  const name = $("inp-name").value.trim();
+  if (!name) { toast("Please enter your name", "error"); return; }
+  S.name     = name;
+  S.myGender = $("inp-gender").value;
+  S.myLevel  = $("inp-level").value;
+  initSocket();
+});
+$("inp-name").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-enter").click(); });
 
-function hintAi(html) {
-  const el = $("aiHintBar");
-  if (el) el.innerHTML = html || "";
-}
+/* ═══════════════════════════════════════════════════════════
+   SOCKET.IO
+═══════════════════════════════════════════════════════════ */
+function initSocket() {
+  $("btn-enter").disabled = true;
+  $("btn-enter").textContent = "Connecting…";
 
-function hintSearch(txt) {
-  const el = $("searchInfo");
-  if (el) el.textContent = txt || "";
-}
+  S.socket = io({ transports: ["websocket","polling"], reconnectionAttempts: 8, reconnectionDelay: 1500 });
 
-/* ─────────────────────────────────────────────────────────
-   NET BADGE
-───────────────────────────────────────────────────────── */
-function netBadge(txt) {
-  const el = $("netBadge");
-  if (!el) return;
-  el.textContent   = txt || "";
-  el.style.display = txt ? "inline-flex" : "none";
-}
+  S.socket.on("connect", () => {
+    S.socket.emit("user:register", { name: S.name, myGender: S.myGender, myLevel: S.myLevel });
+  });
 
-/* ─────────────────────────────────────────────────────────
-   PRACTICE  (localStorage)
-───────────────────────────────────────────────────────── */
-function dKey(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+  S.socket.on("user:register:ok", ({ user, aiScore }) => {
+    S.name     = user.name;
+    S.myGender = user.myGender;
+    S.myLevel  = user.myLevel;
+    S.aiScore  = aiScore;
+    updateScoreUI();
+    updateHeaderUser();
+    showScreen("screen-main");
+    toast(`Welcome, ${S.name}! 🎙️`, "success");
+  });
 
-function loadPrac() {
-  try {
-    const j = JSON.parse(localStorage.getItem(LS_PRAC) || "{}");
-    if (typeof j.sessions === "number") S.prac.sessions = j.sessions;
-    if (typeof j.minutes  === "number") S.prac.minutes  = j.minutes;
-    if (j.days && typeof j.days === "object") S.prac.days = j.days;
-  } catch (_) {}
-}
+  S.socket.on("user:register:fail", ({ reason }) => {
+    $("btn-enter").disabled = false;
+    $("btn-enter").textContent = "Start Speaking →";
+    toast(reason === "banned" ? "You are banned." : "Invalid name. Try again.", "error");
+  });
 
-function savePrac() {
-  try { localStorage.setItem(LS_PRAC, JSON.stringify(S.prac)); } catch (_) {}
-}
+  S.socket.on("global:stats", ({ online, rooms, totals }) => {
+    $("hdr-online").textContent = online;
+    $("hdr-rooms").textContent  = rooms;
+    $("st-online").textContent  = online;
+    $("st-rooms").textContent   = rooms;
+    $("st-msgs").textContent    = totals?.messages || 0;
+  });
 
-function markPrac(mins = 0, sess = 0) {
-  const k = dKey(new Date());
-  if (!S.prac.days[k]) S.prac.days[k] = { minutes: 0, sessions: 0 };
-  S.prac.days[k].minutes  += Math.max(0, mins);
-  S.prac.days[k].sessions += Math.max(0, sess);
-  S.prac.minutes  += Math.max(0, mins);
-  S.prac.sessions += Math.max(0, sess);
-  savePrac();
-  renderStats();
-  renderCal();
-}
+  S.socket.on("global:users", ({ users }) => renderUserList(users));
+  S.socket.on("global:questions", ({ questions }) => { S.questions = questions || []; });
 
-function pracDays()  { return Object.keys(S.prac.days || {}).length; }
+  S.socket.on("match:searching", () => {
+    $("match-controls").classList.add("hidden");
+    $("searching-ui").classList.remove("hidden");
+  });
 
-function calcStreak() {
-  const d = new Date();
-  let streak = 0;
-  for (let i = 0; i < 3650; i++) {
-    if (S.prac.days[dKey(d)]) streak++;
-    else break;
-    d.setDate(d.getDate() - 1);
-  }
-  return streak;
-}
+  S.socket.on("match:found", ({ roomId, partnerName, partnerGender, partnerLevel, aiScore }) => {
+    S.roomId      = roomId;
+    S.isAiRoom    = partnerName === "SpeakBot";
+    S.partnerName = partnerName;
+    S.aiScore     = aiScore;
 
-function calcMissed7() {
-  const d = new Date();
-  let p = 0;
-  for (let i = 0; i < 7; i++) {
-    if (S.prac.days[dKey(d)]) p++;
-    d.setDate(d.getDate() - 1);
-  }
-  return Math.max(0, 7 - p);
-}
+    // Show room
+    $("match-controls").classList.add("hidden");
+    $("searching-ui").classList.add("hidden");
+    $("room-panel").classList.add("visible");
+    $("session-report").classList.add("hidden");
 
-/* Session timing helpers */
-function sessionStart(kind) {
-  if (kind === "human") S.humanTs = now();
-  if (kind === "ai")    S.aiTs    = now();
-}
-
-function sessionEnd(kind) {
-  const end = now();
-  if (kind === "human" && S.humanTs) {
-    markPrac(Math.max(1, Math.round((end - S.humanTs) / 60000)), 1);
-    S.humanTs = 0;
-  }
-  if (kind === "ai" && S.aiTs) {
-    markPrac(Math.max(1, Math.round((end - S.aiTs) / 60000)), 1);
-    S.aiTs = 0;
-  }
-}
-
-/* ─────────────────────────────────────────────────────────
-   RENDER: STATS
-───────────────────────────────────────────────────────── */
-function renderStats() {
-  const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v); };
-  set("hSessions", S.prac.sessions);
-  set("hDays",     pracDays());
-  set("hMinutes",  S.prac.minutes);
-  set("hStreak",   calcStreak());
-  set("hMissed",   calcMissed7());
-}
-
-/* ─────────────────────────────────────────────────────────
-   RENDER: CALENDAR
-───────────────────────────────────────────────────────── */
-const MONTH_NAMES = [
-  "January","February","March","April","May","June",
-  "July","August","September","October","November","December"
-];
-
-function renderCal() {
-  const grid  = $("calGrid");
-  const title = $("calTitle");
-  if (!grid || !title) return;
-
-  const { y, m } = S.cal;
-  title.textContent = `${MONTH_NAMES[m]} ${y}`;
-  grid.innerHTML    = "";
-
-  const firstDow    = new Date(y, m, 1).getDay();
-  const daysInMonth = new Date(y, m + 1, 0).getDate();
-  const prevDays    = new Date(y, m, 0).getDate();
-  const todayKey    = dKey(new Date());
-
-  for (let i = 0; i < 42; i++) {
-    const cell = document.createElement("div");
-    cell.className = "cal-cell";
-
-    const n = i - firstDow + 1;
-    let k   = null;
-
-    if (n <= 0) {
-      const pd = prevDays + n;
-      cell.textContent = String(pd);
-      cell.classList.add("dim");
-      k = dKey(new Date(y, m - 1, pd));
-    } else if (n > daysInMonth) {
-      const nd = n - daysInMonth;
-      cell.textContent = String(nd);
-      cell.classList.add("dim");
-      k = dKey(new Date(y, m + 1, nd));
+    // Partner card
+    $("partner-name").textContent = partnerName;
+    $("partner-meta").textContent = `${partnerLevel || "AI"} • ${partnerGender || "AI"}`;
+    $("partner-avatar").textContent = S.isAiRoom ? "🤖" : partnerName.charAt(0).toUpperCase();
+    if (S.isAiRoom) {
+      $("partner-avatar").classList.add("ai-avatar");
+      $("partner-badge").textContent = "AI";
+      $("partner-badge").className = "badge badge-ai";
+      $("voice-controls-wrap").classList.add("hidden");
     } else {
-      cell.textContent = String(n);
-      k = dKey(new Date(y, m, n));
+      $("partner-avatar").classList.remove("ai-avatar");
+      $("partner-badge").textContent = "HUMAN";
+      $("partner-badge").className = "badge badge-human";
+      $("voice-controls-wrap").classList.remove("hidden");
     }
 
-    if (k === todayKey)      cell.classList.add("today");
-    if (S.prac.days[k])     cell.classList.add("done");
+    clearMessages("talk-messages");
+    updateScoreUI();
 
-    cell.addEventListener("click", () => {
-      if (k && S.prac.days[k]) {
-        const d = S.prac.days[k];
-        hintAi(`📅 ${k}: ${d.minutes} min, ${d.sessions} sessions`);
-      }
-    });
+    // Switch to talk tab
+    $$(".nav-btn").forEach(b => b.classList.remove("active"));
+    $$(".tab-content").forEach(t => t.classList.remove("active"));
+    document.querySelector('.nav-btn[data-tab="talk"]').classList.add("active");
+    $("tab-talk").classList.add("active");
 
-    grid.appendChild(cell);
-  }
+    toast(`Connected with ${partnerName}! 🎉`, "success");
+  });
+
+  S.socket.on("icebreaker:set", ({ index }) => {
+    S.qIndex = index;
+    updateIcebreaker();
+  });
+
+  S.socket.on("chat:message", msg => handleChatMessage(msg, "talk"));
+  S.socket.on("room:ended", ({ reason }) => handleRoomEnded(reason));
+  S.socket.on("coach:report", ({ report, aiScore }) => {
+    S.aiScore = aiScore;
+    updateScoreUI();
+    showReport(report, "talk");
+  });
+
+  /* WebRTC signals */
+  S.socket.on("webrtc:offer",  ({ sdp, from }) => handleOffer(sdp, from));
+  S.socket.on("webrtc:answer", ({ sdp })        => handleAnswer(sdp));
+  S.socket.on("webrtc:ice",    ({ candidate })  => handleIce(candidate));
+
+  /* Partner mute notification */
+  S.socket.on("webrtc:mute", ({ muted }) => {
+    S.partnerMuted = !!muted;
+    $("partner-muted-badge").classList.toggle("hidden", !muted);
+    toast(muted ? `${S.partnerName} muted their mic` : `${S.partnerName} unmuted`, "", 2000);
+  });
+
+  S.socket.on("user:banned", () => { toast("You have been banned.", "error"); location.reload(); });
+  S.socket.on("user:kicked", () => { toast("You were kicked.", "error"); location.reload(); });
+
+  S.socket.on("disconnect", () => toast("Connection lost. Reconnecting…", "error"));
+  S.socket.on("reconnect",  () => { S.socket.emit("user:register", { name: S.name, myGender: S.myGender, myLevel: S.myLevel }); });
 }
 
-/* ─────────────────────────────────────────────────────────
-   RENDER: AI SCORE BAR
-───────────────────────────────────────────────────────── */
-function renderScore(sc) {
+/* ═══════════════════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════════════════ */
+function updateHeaderUser() {
+  $("hdr-name").textContent   = S.name;
+  $("hdr-avatar").textContent = S.name.charAt(0).toUpperCase();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SCORE UI
+═══════════════════════════════════════════════════════════ */
+function updateScoreUI() {
+  const sc = S.aiScore;
   if (!sc) return;
-  const bar = $("scoreBar");
-  if (bar) bar.style.display = "grid";
-  const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? "—"); };
-  set("myBand", sc.band);
-  set("myFlu",  sc.fluency);
-  set("myGra",  sc.grammar);
-  set("myVoc",  sc.vocab);
-  set("myPro",  sc.pronunciation);
+  const aq = sc.aq || 0;
+
+  // AQ circle
+  const circ = 2 * Math.PI * 54.9;
+  const offset = circ - (aq / 100) * circ;
+  const arc = $("aq-arc");
+  if (arc) { arc.style.strokeDasharray = circ; arc.style.strokeDashoffset = offset; }
+  $("aq-num").textContent = aq;
+  $("aq-hint") && ($("aq-hint").classList.add("hidden"));
+
+  const setBar = (barId, valId, val, max) => {
+    const pct = max > 0 ? (val / max) * 100 : 0;
+    $(barId) && ($(barId).style.width = pct + "%");
+    $(valId) && ($(valId).textContent = val);
+  };
+  setBar("bar-fluency",      "val-fluency",      sc.fluency      || 0, 9);
+  setBar("bar-grammar",      "val-grammar",       sc.grammar      || 0, 9);
+  setBar("bar-vocab",        "val-vocab",         sc.vocab        || 0, 9);
+  setBar("bar-pronunciation","val-pronunciation", sc.pronunciation|| 0, 9);
 }
 
-/* ─────────────────────────────────────────────────────────
-   RENDER: ONLINE USERS LIST
-───────────────────────────────────────────────────────── */
-function renderOnline(users) {
-  const list = $("onlineList");
-  const cnt  = $("onlineCount");
-  if (!list) return;
+/* ═══════════════════════════════════════════════════════════
+   USER LIST
+═══════════════════════════════════════════════════════════ */
+function renderUserList(users) {
+  const list = $("users-list");
+  if (!users || !users.length) { list.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;text-align:center;padding:12px;">No users online</div>'; return; }
+  list.innerHTML = users.slice(0, 30).map(u => `
+    <div class="user-item">
+      <div class="user-item-avatar">${u.name.charAt(0).toUpperCase()}</div>
+      <span class="user-item-name">${esc(u.name)}</span>
+      ${u.roomId ? '<span style="font-size:.7rem;color:var(--primary);">💬</span>' : u.searching ? '<span style="font-size:.7rem;color:var(--blue);">🔍</span>' : ''}
+      <span class="user-item-level">${u.myLevel||''}</span>
+    </div>
+  `).join("");
+}
 
-  const all = Array.isArray(users) ? users : [];
-  if (cnt) cnt.textContent = String(all.length);
+/* ═══════════════════════════════════════════════════════════
+   ICEBREAKER
+═══════════════════════════════════════════════════════════ */
+function updateIcebreaker() {
+  const q = S.questions[S.qIndex];
+  if (q) $("ib-text").textContent = q;
+}
+$("ib-prev").addEventListener("click", () => { if (!S.roomId) return; S.socket.emit("icebreaker:nav", { roomId: S.roomId, dir: "prev" }); });
+$("ib-next").addEventListener("click", () => { if (!S.roomId) return; S.socket.emit("icebreaker:nav", { roomId: S.roomId, dir: "next" }); });
 
-  /* exclude self */
-  const others = all.filter(u => u.name !== S.name);
+/* ═══════════════════════════════════════════════════════════
+   MATCH CONTROLS
+═══════════════════════════════════════════════════════════ */
+$("btn-find-human").addEventListener("click", () => {
+  if (!S.socket) return;
+  const wantGender = $("pref-gender").value;
+  const wantLevel  = $("pref-level").value;
+  S.socket.emit("match:start", { wantGender, wantLevel });
+});
 
-  if (!others.length) {
-    list.innerHTML = `<div class="empty-state">No one else online right now. Invite a friend!</div>`;
-    return;
+$("btn-stop-search").addEventListener("click", () => {
+  S.socket?.emit("match:stop");
+  $("searching-ui").classList.add("hidden");
+  $("match-controls").classList.remove("hidden");
+});
+
+/* ═══════════════════════════════════════════════════════════
+   CHAT — TALK TAB (human + AI messages shared channel)
+═══════════════════════════════════════════════════════════ */
+$("talk-send").addEventListener("click", () => sendTalkMsg());
+$("talk-input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) sendTalkMsg(); });
+
+function sendTalkMsg() {
+  const txt = $("talk-input").value.trim();
+  if (!txt || !S.roomId) return;
+  S.socket.emit("chat:message", { roomId: S.roomId, text: txt });
+  $("talk-input").value = "";
+}
+
+function handleChatMessage(msg, channel) {
+  const isMe = msg.from === S.name;
+  const isAI = !!msg.isAI;
+  const container = channel === "bot" ? $("bot-messages") : $("talk-messages");
+  const typing    = channel === "bot" ? $("bot-typing")   : $("talk-typing");
+
+  typing.classList.remove("visible");
+
+  const wrapper = document.createElement("div");
+  wrapper.className = `msg ${isMe ? "msg-mine" : "msg-theirs"}`;
+  if (!S.isAiRoom && !isAI) wrapper.classList.add("human-chat");
+  if (isAI) wrapper.classList.add("ai-msg");
+
+  if (!isMe) {
+    const from = document.createElement("div");
+    from.className = "msg-from";
+    from.textContent = msg.from;
+    wrapper.appendChild(from);
   }
 
-  list.innerHTML = "";
-  others.forEach(u => {
-    const row = document.createElement("div");
-    row.className = "ol-row";
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble";
 
-    const ini  = (u.name || "?")[0].toUpperCase();
-    const meta = [
-      u.gender !== "Any" ? u.gender : null,
-      u.level  !== "Any" ? u.level  : null,
-    ].filter(Boolean).join(" · ");
+  if (isAI) {
+    // Parse ---REPLY--- ... ---SCORE--- ... ---END--- format
+    const parsed = parseAIMsg(msg.text);
+    const replyEl = document.createElement("div");
+    replyEl.className = "ai-reply-text";
+    replyEl.textContent = parsed.reply;
+    bubble.appendChild(replyEl);
 
-    const statusHtml = u.roomId
-      ? `<span class="ol-status" style="color:var(--dim);">In session</span>`
-      : `<span class="ol-status" style="color:#86efac;">Available</span>`;
+    if (parsed.scores) {
+      const scRow = document.createElement("div");
+      scRow.className = "ai-score-inline";
+      if (parsed.scores.fluency)     scRow.innerHTML += `<span class="score-chip">Fluency ${parsed.scores.fluency}</span>`;
+      if (parsed.scores.grammar)     scRow.innerHTML += `<span class="score-chip">Grammar ${parsed.scores.grammar}</span>`;
+      if (parsed.scores.vocabulary)  scRow.innerHTML += `<span class="score-chip">Vocab ${parsed.scores.vocabulary}</span>`;
+      if (parsed.scores.aq)          scRow.innerHTML += `<span class="score-chip aq-chip">AQ ${parsed.scores.aq}</span>`;
+      bubble.appendChild(scRow);
 
-    row.innerHTML = `
-      <div class="ol-avatar">${esc(ini)}</div>
-      <div class="ol-name">${esc(u.name)}</div>
-      <div class="ol-meta">${esc(meta)}</div>
-      ${statusHtml}
-      <div class="ol-dot"></div>
-    `;
-    list.appendChild(row);
-  });
-}
-
-/* ─────────────────────────────────────────────────────────
-   RENDER: ICEBREAKER QUESTION
-───────────────────────────────────────────────────────── */
-function renderQ() {
-  const total = S.questions.length || 10;
-  S.qIdx = clamp(S.qIdx, 0, total - 1);
-
-  const qi = $("qIdx");  if (qi) qi.textContent = String(S.qIdx + 1);
-  const qt = $("qText"); if (qt) qt.textContent = S.questions[S.qIdx] || "Loading questions…";
-
-  const prev = $("qPrev");
-  const next = $("qNext");
-  if (prev) { prev.disabled = S.qIdx === 0;          prev.style.opacity = prev.disabled ? ".3" : "1"; }
-  if (next) { next.disabled = S.qIdx === total - 1;  next.style.opacity = next.disabled ? ".3" : "1"; }
-}
-
-/* ─────────────────────────────────────────────────────────
-   RENDER: LEADERBOARD
-───────────────────────────────────────────────────────── */
-function renderLb(rows) {
-  const el = $("leaderboard");
-  if (!el) return;
-
-  const arr = Array.isArray(rows) ? rows : [];
-  if (!arr.length) {
-    el.innerHTML = `<div class="empty-state">No ratings yet.</div>`;
-    return;
-  }
-
-  el.innerHTML = "";
-  arr.slice(0, 20).forEach((x, i) => {
-    const row = document.createElement("div");
-    row.className = "lb-row";
-    const rankClass = i === 0 ? "lb-rank g1" : i === 1 ? "lb-rank g2" : i === 2 ? "lb-rank g3" : "lb-rank";
-    row.innerHTML = `
-      <div class="${rankClass}">${i + 1}</div>
-      <div class="lb-name">${esc(x.name)}</div>
-      <div class="lb-badge">⭐ ${esc(String(x.avg))} <span style="opacity:.6;">(${esc(String(x.count))})</span></div>
-    `;
-    el.appendChild(row);
-  });
-}
-
-/* ─────────────────────────────────────────────────────────
-   CHIPS  (gender / level selection)
-───────────────────────────────────────────────────────── */
-function syncChips(groupId, activeVal) {
-  const g = $(groupId);
-  if (!g) return;
-  g.querySelectorAll(".chip").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.val === activeVal);
-  });
-}
-
-/* ─────────────────────────────────────────────────────────
-   RESET HELPERS
-───────────────────────────────────────────────────────── */
-function resetConv() {
-  const msgs = $("messages"); if (msgs) msgs.innerHTML = "";
-  const mi   = $("msgInput"); if (mi)   mi.value       = "";
-
-  S.room  = { id: null, partner: null, polite: false };
-  S.qIdx  = 0;
-  S.humanTs = 0;
-
-  renderQ();
-  hintVoice("");
-  hintSearch("");
-  stopVoice().catch(() => {});
-  convState("idle");
-}
-
-function resetAi() {
-  const am = $("aiMessages"); if (am) am.innerHTML = "";
-  const ai = $("aiInput");    if (ai) ai.value     = "";
-  const ar = $("aiReport");   if (ar) ar.style.display = "none";
-
-  S.ai   = { id: null };
-  S.aiTs = 0;
-
-  stopAiMic();
-  setAiVoiceBtn();
-  hintAi("Press <strong>Start AI</strong> below to begin your session.");
-}
-
-/* ─────────────────────────────────────────────────────────
-   RTC CONFIG  (fetch /webrtc-config)
-───────────────────────────────────────────────────────── */
-async function loadRtcCfg() {
-  try {
-    const r = await fetch("/webrtc-config");
-    const j = await r.json();
-    if (Array.isArray(j?.iceServers) && j.iceServers.length) S.iceServers = j.iceServers;
-    S.forceRelay = !!j?.forceRelay;
-  } catch (_) {}
-}
-
-/* ─────────────────────────────────────────────────────────
-   AUDIO WARM-UP  (unlock autoplay on mobile)
-───────────────────────────────────────────────────────── */
-async function warmAudio() {
-  if (S.audioWarm) return;
-  S.audioWarm = true;
-  const a = $("remoteAudio");
-  if (!a) return;
-  try { a.muted = true; await a.play().catch(() => {}); a.muted = false; } catch (_) {}
-}
-
-/* ─────────────────────────────────────────────────────────
-   WebRTC  ——  ONE-WAY VOICE READY
-
-   Core idea:
-     • When partner presses "Voice On" they emit webrtc:offer.
-     • We ALWAYS answer that offer even if WE haven't pressed
-       Voice On yet — this lets us HEAR them immediately.
-     • If WE then press Voice On, we add our tracks and
-       renegotiation happens automatically.
-     • Result: one-way audio works instantly for the listener.
-───────────────────────────────────────────────────────── */
-function buildPeer() {
-  destroyPeer();
-
-  S.pc = new RTCPeerConnection({
-    iceServers:         S.iceServers,
-    iceTransportPolicy: S.forceRelay ? "relay" : "all",
-  });
-
-  /* Remote audio → <audio> element */
-  S.pc.ontrack = ev => {
-    const [st] = ev.streams;
-    const a    = $("remoteAudio");
-    if (st && a) { a.srcObject = st; a.play().catch(() => {}); }
-  };
-
-  /* ICE candidates → server */
-  S.pc.onicecandidate = ev => {
-    if (ev.candidate && S.room.id)
-      socket.emit("webrtc:ice", { roomId: S.room.id, candidate: ev.candidate });
-  };
-
-  /* Connection state feedback */
-  S.pc.onconnectionstatechange = () => {
-    if (!S.pc) return;
-    const cs = S.pc.connectionState;
-    if (cs === "connected")    hintVoice("Voice connected ✅");
-    if (cs === "failed")       hintVoice("Voice failed ❌  (check network / TURN required)");
-    if (cs === "disconnected") hintVoice("Voice disconnected.");
-  };
-
-  /* Renegotiation needed → create offer */
-  S.pc.onnegotiationneeded = async () => {
-    try {
-      S.makingOffer = true;
-      const offer = await S.pc.createOffer({ offerToReceiveAudio: true });
-      if (!S.pc || S.pc.signalingState !== "stable") return;
-      await S.pc.setLocalDescription(offer);
-      socket.emit("webrtc:offer", { roomId: S.room.id, sdp: S.pc.localDescription });
-    } catch (_) {
-      hintVoice("Offer error.");
-    } finally {
-      S.makingOffer = false;
+      // Update live score panel
+      updateLiveScores(parsed.scores);
     }
+  } else {
+    bubble.textContent = msg.text;
+  }
+
+  const timeEl = document.createElement("div");
+  timeEl.className = "msg-time";
+  timeEl.textContent = formatTime(msg.ts);
+  bubble.appendChild(timeEl);
+
+  wrapper.appendChild(bubble);
+  container.insertBefore(wrapper, typing);
+  container.scrollTop = container.scrollHeight;
+}
+
+/* Parse AI response format:
+   ---REPLY---\n<text>\n---SCORE---\n...\n---END--- */
+function parseAIMsg(raw) {
+  const txt = String(raw || "");
+
+  const replyMatch = txt.match(/---REPLY---\s*([\s\S]*?)(?=---SCORE---|---END---|$)/i);
+  const scoreMatch = txt.match(/---SCORE---\s*([\s\S]*?)(?=---END---|$)/i);
+
+  let reply = txt;
+  let scores = null;
+
+  if (replyMatch) {
+    reply = replyMatch[1].trim();
+  }
+
+  if (scoreMatch) {
+    const scoreText = scoreMatch[1].trim();
+    scores = {};
+    const extract = (label) => {
+      const m = scoreText.match(new RegExp(`${label}[:\\s]*(\\d+)`, "i"));
+      return m ? parseInt(m[1], 10) : null;
+    };
+    scores.fluency     = extract("fluency");
+    scores.grammar     = extract("grammar");
+    scores.vocabulary  = extract("vocabulary") || extract("vocab");
+    scores.pronunciation = extract("pronunciation");
+    scores.aq          = extract("aq") || extract("overall");
+  }
+
+  // Fallback: if no markers found, return whole text as reply
+  if (!replyMatch && !scoreMatch) {
+    reply = txt.replace(/Score:[\s\S]*$/i, "").trim();
+    const sc = {};
+    sc.fluency      = extractNum(txt, "fluency");
+    sc.grammar      = extractNum(txt, "grammar");
+    sc.vocabulary   = extractNum(txt, "vocabulary") || extractNum(txt, "vocab");
+    sc.pronunciation= extractNum(txt, "pronunciation");
+    sc.aq           = extractNum(txt, "aq") || extractNum(txt, "overall");
+    if (sc.fluency || sc.grammar || sc.aq) scores = sc;
+  }
+
+  return { reply, scores };
+}
+
+function extractNum(txt, label) {
+  const m = txt.match(new RegExp(`${label}[:\\s]*(\\d+)`, "i"));
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function updateLiveScores(scores) {
+  if (!scores) return;
+  const set = (id, barId, val, max) => {
+    if (val == null) return;
+    $(id) && ($(id).textContent = val);
+    $(barId) && ($(barId).style.width = `${(val/max)*100}%`);
   };
-}
+  set("ls-fluency",  "lsb-fluency",  scores.fluency,      9);
+  set("ls-grammar",  "lsb-grammar",  scores.grammar,      9);
+  set("ls-vocab",    "lsb-vocab",    scores.vocabulary,   9);
+  set("ls-aq",       "lsb-aq",       scores.aq,           100);
 
-function destroyPeer() {
-  if (!S.pc) return;
-  try { S.pc.ontrack = null; S.pc.onicecandidate = null; S.pc.onnegotiationneeded = null; } catch (_) {}
-  try { S.pc.close(); } catch (_) {}
-  S.pc = null;
-}
-
-/**
- * Handle incoming offer from partner.
- * Always answers, even before local Voice On → one-way audio.
- */
-async function handleOffer(sdp, from) {
-  if (!S.room.id) return;
-
-  /* Build peer if not yet created (listener receives before pressing Voice On) */
-  if (!S.pc) buildPeer();
-
-  const collision   = S.makingOffer || S.pc.signalingState !== "stable";
-  S.ignoreOffer     = !S.room.polite && collision;
-  if (S.ignoreOffer) return;
-
-  try {
-    await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
-
-    if (sdp.type === "offer") {
-      /* If we already have local stream (Voice On active), add tracks */
-      if (S.stream && S.voiceOn) {
-        const senders = S.pc.getSenders();
-        S.stream.getTracks().forEach(t => {
-          if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
-        });
-      }
-
-      const ans = await S.pc.createAnswer();
-      await S.pc.setLocalDescription(ans);
-      socket.emit("webrtc:answer", { roomId: S.room.id, sdp: S.pc.localDescription });
-
-      /* Inform listener they can now hear partner */
-      hintVoice(`${esc(from)} turned on voice — you can hear them now. Press Voice On to also speak.`);
-    }
-  } catch (_) {
-    hintVoice("Voice connection error.");
+  // Also update home tab scores for latest
+  if (scores.fluency)  { $("bar-fluency").style.width = `${(scores.fluency/9)*100}%`; $("val-fluency").textContent = scores.fluency; }
+  if (scores.grammar)  { $("bar-grammar").style.width = `${(scores.grammar/9)*100}%`; $("val-grammar").textContent = scores.grammar; }
+  if (scores.vocabulary){ $("bar-vocab").style.width = `${(scores.vocabulary/9)*100}%`; $("val-vocab").textContent = scores.vocabulary; }
+  if (scores.aq) {
+    $("aq-num").textContent = scores.aq;
+    const circ = 2 * Math.PI * 54.9;
+    $("aq-arc").style.strokeDasharray  = circ;
+    $("aq-arc").style.strokeDashoffset = circ - (scores.aq / 100) * circ;
+    $("aq-hint") && $("aq-hint").classList.add("hidden");
   }
 }
+
+function clearMessages(id) {
+  const c = $(id);
+  // Keep typing indicator
+  const typing = c.querySelector(".typing-indicator");
+  c.innerHTML = "";
+  if (typing) c.appendChild(typing);
+}
+
+function formatTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function esc(str) {
+  return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ROOM ENDED
+═══════════════════════════════════════════════════════════ */
+function handleRoomEnded(reason) {
+  stopVoice();
+  S.roomId   = null;
+  S.isAiRoom = false;
+  $("room-panel").classList.remove("visible");
+  $("match-controls").classList.remove("hidden");
+  $("partner-muted-badge").classList.add("hidden");
+
+  if (reason !== "left" && reason !== "restart_search") {
+    toast(`Session ended: ${reason || "partner left"}`, "", 3000);
+    // show rating modal for human rooms
+    if (!S.isAiRoom && S.partnerName) openRateModal();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LEAVE / REPORT
+═══════════════════════════════════════════════════════════ */
+$("btn-leave").addEventListener("click", () => {
+  if (!S.roomId) return;
+  const wasAI = S.isAiRoom;
+  S.socket.emit("room:leave");
+  stopVoice();
+  if (!wasAI) openRateModal();
+});
+
+$("btn-report").addEventListener("click", () => {
+  if (!S.roomId || S.isAiRoom) return;
+  S.socket.emit("report:partner", { roomId: S.roomId });
+  toast("Partner reported.", "", 2500);
+});
+
+/* ── End report display ─ */
+function showReport(report, channel) {
+  if (channel === "talk") {
+    $("room-panel").classList.remove("visible");
+    $("session-report").classList.remove("hidden");
+    $("rep-band").textContent    = report.band ?? "—";
+    $("rep-summary").textContent = report.summary || "";
+    renderList($("rep-fixes"),  report.fixes  || [], "fix-item");
+    renderList($("rep-steps"),  report.next_steps || [], "step-item");
+    $("match-controls").classList.add("hidden");
+  } else {
+    $("bot-room-wrap").classList.add("hidden");
+    $("bot-report").classList.remove("hidden");
+    $("bot-rep-band").textContent    = report.band ?? "—";
+    $("bot-rep-summary").textContent = report.summary || "";
+    renderList($("bot-rep-fixes"),  report.fixes  || [], "fix-item");
+    renderList($("bot-rep-steps"),  report.next_steps || [], "step-item");
+  }
+}
+$("rep-close").addEventListener("click", () => {
+  $("session-report").classList.add("hidden");
+  $("match-controls").classList.remove("hidden");
+});
+$("bot-rep-close").addEventListener("click", () => {
+  $("bot-report").classList.add("hidden");
+  $("bot-start-wrap").classList.remove("hidden");
+  clearMessages("bot-messages");
+  clearLiveScores();
+});
+
+function renderList(container, items, cls) {
+  container.innerHTML = items.slice(0, 5).map(i => `<div class="${cls}">${esc(String(i))}</div>`).join("");
+}
+function clearLiveScores() {
+  ["ls-fluency","ls-grammar","ls-vocab","ls-aq"].forEach(id => $(id) && ($(id).textContent = "—"));
+  ["lsb-fluency","lsb-grammar","lsb-vocab","lsb-aq"].forEach(id => $(id) && ($(id).style.width = "0%"));
+}
+
+/* ═══════════════════════════════════════════════════════════
+   BOT TAB
+═══════════════════════════════════════════════════════════ */
+$("btn-start-bot").addEventListener("click", () => {
+  if (!S.socket) return;
+  $("bot-start-wrap").classList.add("hidden");
+  $("bot-room-wrap").classList.remove("hidden");
+  $("bot-report").classList.add("hidden");
+  clearMessages("bot-messages");
+  clearLiveScores();
+
+  // Use match:start with AI
+  S.socket.emit("match:start", { wantGender: "AI", wantLevel: "Any" });
+  S.socket.off("match:found.bot");
+  S.socket.on("match:found", onBotMatchFound);
+});
+
+function onBotMatchFound({ roomId, partnerName }) {
+  if (partnerName !== "SpeakBot") return; // Only handle AI matches here
+  S.socket.off("match:found", onBotMatchFound);
+
+  // Sync S.roomId for bot chat
+  S.roomId   = roomId;
+  S.isAiRoom = true;
+
+  // Send initial greeting
+  setTimeout(() => {
+    const greetings = [
+      "Hey! How's your day going? 😊",
+      "Hi there! What's on your mind today?",
+      "Hello! Ready for a great conversation? ✨",
+    ];
+    S.socket.emit("chat:message", { roomId: S.roomId, text: greetings[Math.floor(Math.random() * greetings.length)] });
+  }, 600);
+
+  $("bot-typing").classList.add("visible");
+});
+
+// Override the global chat:message for bot channel
+const _origHandleChat = handleChatMessage;
+// Route bot messages to bot channel based on room
+function routeMessage(msg) {
+  if (S.isAiRoom && S.roomId) {
+    handleChatMessage(msg, "bot");
+  } else {
+    handleChatMessage(msg, "talk");
+  }
+}
+
+// Re-subscribe so bot messages go to bot panel
+// (Socket listener already set in initSocket; we patch routing):
+// We already have:  socket.on("chat:message", msg => handleChatMessage(msg, "talk"))
+// So we'll update initSocket's chat:message to call routeMessage instead.
+// Patch after socket is created — see patchSocket() below.
+
+function patchSocket() {
+  S.socket.off("chat:message");
+  S.socket.on("chat:message", msg => {
+    // Route: if we're in an AI room (bot tab), send to bot panel
+    if (S.isAiRoom) {
+      $("bot-typing").classList.remove("visible");
+      handleChatMessage(msg, "bot");
+    } else {
+      handleChatMessage(msg, "talk");
+    }
+  });
+}
+
+$("btn-end-bot").addEventListener("click", () => {
+  if (!S.roomId) return;
+  S.socket.emit("room:leave");
+  S.socket.once("coach:report", ({ report, aiScore }) => {
+    S.aiScore = aiScore;
+    updateScoreUI();
+    showReport(report, "bot");
+  });
+});
+
+$("bot-send").addEventListener("click", () => sendBotMsg());
+$("bot-input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) sendBotMsg(); });
+
+function sendBotMsg() {
+  const txt = $("bot-input").value.trim();
+  if (!txt || !S.roomId) return;
+  S.socket.emit("chat:message", { roomId: S.roomId, text: txt });
+  $("bot-input").value = "";
+  $("bot-typing").classList.add("visible");
+}
+
+/* ═══════════════════════════════════════════════════════════
+   WEBRTC — VOICE
+═══════════════════════════════════════════════════════════ */
+$("btn-start-voice").addEventListener("click", startVoice);
 
 async function startVoice() {
-  if (!S.room.id)  { hintVoice("Join a room first."); return; }
-  if (S.voiceOn)   return;
-
-  hintVoice("Requesting microphone…");
+  if (S.voiceActive) return;
+  if (!S.roomId || S.isAiRoom) return;
 
   try {
-    S.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl:  true,
-        channelCount:     1,
-        sampleRate:       48000,
-      },
-      video: false,
-    });
-  } catch (_) {
-    hintVoice("Microphone access denied. Allow mic in your browser settings.");
-    return;
+    S.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    S.voiceActive = true;
+    S.micMuted    = false;
+
+    $("btn-start-voice").classList.add("hidden");
+    $("btn-mute-mic").classList.remove("hidden");
+    $("btn-mute-remote").classList.remove("hidden");
+    updateMuteUI();
+
+    const config = await fetchIceConfig();
+    await createPeerConn(config);
+    S.localStream.getTracks().forEach(t => S.pc.addTrack(t, S.localStream));
+
+    const offer = await S.pc.createOffer({ offerToReceiveAudio: true });
+    await S.pc.setLocalDescription(offer);
+    S.socket.emit("webrtc:offer", { roomId: S.roomId, sdp: offer });
+    toast("Voice connected 🎙️", "success");
+  } catch (err) {
+    toast("Mic access denied: " + err.message, "error");
   }
-
-  S.voiceOn = true;
-  const btn = $("btnVoice");
-  if (btn) btn.innerHTML = "🔴 Voice Off";
-
-  /* Build peer if listener hadn't built it yet */
-  if (!S.pc) buildPeer();
-
-  /* Add microphone tracks → triggers onnegotiationneeded → offer */
-  const senders = S.pc.getSenders();
-  S.stream.getTracks().forEach(t => {
-    if (!senders.some(s => s.track === t)) S.pc.addTrack(t, S.stream);
-  });
-
-  hintVoice("Mic on ✅  Connecting voice to partner…");
 }
 
-async function stopVoice() {
-  S.voiceOn = false;
+async function handleOffer(sdp, from) {
+  if (!S.roomId || S.isAiRoom) return;
+  try {
+    S.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    S.voiceActive = true;
+    S.micMuted    = false;
 
-  const btn = $("btnVoice");
-  if (btn) btn.innerHTML = "🎙️ Voice On";
-  hintVoice("");
+    $("btn-start-voice").classList.add("hidden");
+    $("btn-mute-mic").classList.remove("hidden");
+    $("btn-mute-remote").classList.remove("hidden");
+    updateMuteUI();
 
-  if (S.stream) {
-    S.stream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
-    S.stream = null;
+    const config = await fetchIceConfig();
+    await createPeerConn(config);
+    S.localStream.getTracks().forEach(t => S.pc.addTrack(t, S.localStream));
+
+    await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await S.pc.createAnswer();
+    await S.pc.setLocalDescription(answer);
+    S.socket.emit("webrtc:answer", { roomId: S.roomId, sdp: answer });
+  } catch (err) {
+    toast("Voice setup error: " + err.message, "error");
   }
-
-  destroyPeer();
-
-  const a = $("remoteAudio");
-  if (a) a.srcObject = null;
 }
 
-/* ─────────────────────────────────────────────────────────
-   AI VOICE  (SpeechRecognition + TTS)
-───────────────────────────────────────────────────────── */
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const aiOk = () => !!SR && !!window.speechSynthesis;
+async function handleAnswer(sdp) {
+  if (!S.pc) return;
+  try { await S.pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch {}
+}
 
-function setAiVoiceBtn() {
-  const btn = $("btnAiVoice");
-  if (!btn) return;
-  if (S.aiListening) {
-    btn.textContent = "🛑 Voice Off";
-    btn.classList.add("on");
+async function handleIce(candidate) {
+  if (!S.pc || !candidate) return;
+  try { await S.pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+}
+
+async function createPeerConn(config) {
+  S.pc = new RTCPeerConnection(config);
+  S.pc.onicecandidate = ({ candidate }) => {
+    if (candidate) S.socket.emit("webrtc:ice", { roomId: S.roomId, candidate });
+  };
+  S.pc.ontrack = ({ streams }) => {
+    const audio = $("remote-audio");
+    if (audio && streams[0]) {
+      audio.srcObject = streams[0];
+      audio.muted = S.remoteMuted;
+    }
+  };
+  S.pc.onconnectionstatechange = () => {
+    if (["failed","disconnected","closed"].includes(S.pc.connectionState)) {
+      toast("Voice connection lost.", "error");
+      resetVoiceUI();
+    }
+  };
+}
+
+async function fetchIceConfig() {
+  try {
+    const r = await fetch("/webrtc-config");
+    return await r.json();
+  } catch {
+    return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+  }
+}
+
+/* ── Mic mute (your own audio) ─────────────────────────── */
+$("btn-mute-mic").addEventListener("click", toggleMicMute);
+
+function toggleMicMute() {
+  S.micMuted = !S.micMuted;
+  if (S.localStream) {
+    S.localStream.getAudioTracks().forEach(t => { t.enabled = !S.micMuted; });
+  }
+  // Notify partner
+  S.socket.emit("webrtc:mute", { roomId: S.roomId, muted: S.micMuted });
+  updateMuteUI();
+  toast(S.micMuted ? "Your mic muted 🔇" : "Mic unmuted 🎤", "", 2000);
+}
+
+/* ── Remote mute (their audio for you) ─────────────────── */
+$("btn-mute-remote").addEventListener("click", toggleRemoteMute);
+
+function toggleRemoteMute() {
+  S.remoteMuted = !S.remoteMuted;
+  const audio = $("remote-audio");
+  if (audio) audio.muted = S.remoteMuted;
+  updateMuteUI();
+  toast(S.remoteMuted ? `${S.partnerName}'s voice muted 🔇` : `${S.partnerName}'s voice on 🔊`, "", 2000);
+}
+
+function updateMuteUI() {
+  // Mic button
+  const micBtn = $("btn-mute-mic");
+  if (S.micMuted) {
+    micBtn.classList.add("muted");
+    micBtn.querySelector("span:not(.vc-icon)") && (micBtn.querySelectorAll("span")[1].textContent = "Unmute Mic");
+    micBtn.querySelector(".vc-icon").textContent = "🔇";
   } else {
-    btn.textContent = "🎙️ Voice On";
-    btn.classList.remove("on");
+    micBtn.classList.remove("muted");
+    micBtn.querySelectorAll("span")[1] && (micBtn.querySelectorAll("span")[1].textContent = "Mute Mic");
+    micBtn.querySelector(".vc-icon").textContent = "🎤";
+  }
+  // Remote button
+  const remBtn = $("btn-mute-remote");
+  if (S.remoteMuted) {
+    remBtn.classList.add("muted");
+    remBtn.querySelectorAll("span")[1] && (remBtn.querySelectorAll("span")[1].textContent = "Unmute Them");
+    remBtn.querySelector(".vc-icon").textContent = "🔕";
+  } else {
+    remBtn.classList.remove("muted");
+    remBtn.querySelectorAll("span")[1] && (remBtn.querySelectorAll("span")[1].textContent = "Mute Them");
+    remBtn.querySelector(".vc-icon").textContent = "🔊";
   }
 }
 
-async function aiSpeak(text) {
-  return new Promise(resolve => {
-    if (!window.speechSynthesis) { resolve(); return; }
-    try {
-      window.speechSynthesis.cancel();
-      const utt    = new SpeechSynthesisUtterance(String(text || ""));
-      utt.lang     = "en-US";
-      utt.rate     = 1;
-      utt.pitch    = 1;
-      S.aiSpeaking = true;
-      hintAi("AI speaking… 🔊");
-
-      utt.onend  = () => { S.aiSpeaking = false; hintAi("Your turn → Voice On → speak → Voice Off 🎙️"); resolve(); };
-      utt.onerror= () => { S.aiSpeaking = false; hintAi("TTS error. Check browser TTS support."); resolve(); };
-
-      window.speechSynthesis.speak(utt);
-    } catch (_) {
-      S.aiSpeaking = false;
-      resolve();
-    }
-  });
+function stopVoice() {
+  if (S.localStream) { S.localStream.getTracks().forEach(t => t.stop()); S.localStream = null; }
+  if (S.pc)          { try { S.pc.close(); } catch {} S.pc = null; }
+  const audio = $("remote-audio");
+  if (audio) { audio.srcObject = null; audio.muted = false; }
+  S.voiceActive = false;
+  S.micMuted    = false;
+  S.remoteMuted = false;
+  resetVoiceUI();
 }
 
-function stopAiMic() {
-  clearTimeout(S.aiAutoStop);
-  S.aiAutoStop  = null;
-  S.aiListening = false;
-  setAiVoiceBtn();
-
-  const rec = S.aiRec;
-  S.aiRec = null;
-  try { rec && rec.stop(); } catch (_) {}
+function resetVoiceUI() {
+  $("btn-start-voice").classList.remove("hidden");
+  $("btn-mute-mic").classList.add("hidden");
+  $("btn-mute-remote").classList.add("hidden");
 }
 
-function startAiMic() {
-  if (!S.ai.id) { hintAi("Press <strong>Start AI</strong> first."); return; }
-
-  if (!aiOk()) {
-    hintAi("Voice requires Chrome with SpeechRecognition support.");
-    return;
-  }
-  if (S.aiSpeaking) {
-    hintAi("Wait — AI is still speaking…");
-    return;
-  }
-  if (S.aiListening) return;
-
-  const rec = new SR();
-  S.aiRec        = rec;
-  rec.lang         = "en-US";
-  rec.interimResults = true;
-  rec.continuous   = true;
-
-  S.aiLastText   = "";
-  S.aiListening  = true;
-  setAiVoiceBtn();
-  hintAi("Listening… speak now 🎙️  Press <strong>Voice Off</strong> when done.");
-
-  rec.onresult = e => {
-    let final = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i];
-      if (r.isFinal) final += (final ? " " : "") + (r[0]?.transcript || "").trim();
-    }
-    if (final) S.aiLastText = (S.aiLastText + " " + final).trim();
-
-    /* Auto-stop after 2.2s silence */
-    clearTimeout(S.aiAutoStop);
-    S.aiAutoStop = setTimeout(() => {
-      if (S.aiListening) stopAiMicAndSend();
-    }, 2200);
-  };
-
-  rec.onerror = () => { hintAi("Mic error."); stopAiMic(); };
-  rec.onend   = () => { if (S.aiListening) { try { rec.start(); } catch (_) {} } };
-
-  try { rec.start(); } catch (_) {}
+/* ═══════════════════════════════════════════════════════════
+   RATING MODAL
+═══════════════════════════════════════════════════════════ */
+function openRateModal() {
+  S.pendingRoomId = S.roomId;
+  S.pendingStars  = 0;
+  $$(".star-btn").forEach(b => b.classList.remove("lit"));
+  $("rate-modal").classList.add("open");
 }
-
-async function stopAiMicAndSend() {
-  if (!S.aiListening) return;
-  stopAiMic();
-
-  const txt = (S.aiLastText || "").trim();
-  if (!txt) { hintAi("No speech detected. Try again."); return; }
-
-  addMsg("aiMessages", S.name, txt, "me");
-  socket.emit("chat:message", { roomId: S.ai.id, text: txt });
-  markPrac(1, 0);
-  hintAi("Sent ✅  Waiting for AI Coach…");
-}
-
-/* ─────────────────────────────────────────────────────────
-   SEND MESSAGE HELPERS
-───────────────────────────────────────────────────────── */
-function sendHuman() {
-  if (now() - S.lastHumanSend < S.cdMs) { hintVoice("Slow down a bit…"); return; }
-  S.lastHumanSend = now();
-
-  const mi = $("msgInput");
-  const txt = (mi?.value || "").trim();
-  if (!txt || !S.room.id) return;
-  if (mi) mi.value = "";
-  socket.emit("chat:message", { roomId: S.room.id, text: txt });
-}
-
-function sendAi() {
-  if (now() - S.lastAiSend < S.cdMs) { hintAi("Slow down a bit…"); return; }
-  S.lastAiSend = now();
-
-  const ai = $("aiInput");
-  const txt = (ai?.value || "").trim();
-  if (!txt || !S.ai.id) return;
-  if (ai) ai.value = "";
-
-  addMsg("aiMessages", S.name, txt, "me");
-  socket.emit("chat:message", { roomId: S.ai.id, text: txt });
-  markPrac(1, 0);
-  hintAi("Sent ✅  Waiting for AI Coach…");
-}
-
-/* ─────────────────────────────────────────────────────────
-   WIRE: UI EVENTS
-───────────────────────────────────────────────────────── */
-function wireUI() {
-
-  /* ── Name screen ──────────────────────────────────── */
-  const doJoin = () => {
-    const ne  = $("nameErr");
-    const val = ($("nameInput")?.value || "").trim();
-    if (!val) { if (ne) ne.textContent = "Please enter a name."; return; }
-    if (ne) ne.textContent = "";
-    socket.emit("user:register", { name: val });
-  };
-  $("btnJoin")?.addEventListener("click", doJoin);
-  $("nameInput")?.addEventListener("keydown", e => { if (e.key === "Enter") doJoin(); });
-
-  /* ── Logout ───────────────────────────────────────── */
-  $("btnLogout")?.addEventListener("click", () => {
-    localStorage.removeItem(LS_NAME);
-    location.reload();
+$$(".star-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const n = parseInt(btn.dataset.stars, 10);
+    S.pendingStars = n;
+    $$(".star-btn").forEach(b => b.classList.toggle("lit", parseInt(b.dataset.stars, 10) <= n));
   });
-
-  /* ── Bottom nav ───────────────────────────────────── */
-  $("navHome")?.addEventListener("click", () => setTab("home"));
-  $("navConv")?.addEventListener("click", () => setTab("conv"));
-  $("navAi")?.addEventListener("click",   () => setTab("ai"));
-
-  /* ── Home tab ─────────────────────────────────────── */
-  $("btnResetStats")?.addEventListener("click", () => {
-    S.prac = { sessions: 0, minutes: 0, days: {} };
-    savePrac(); renderStats(); renderCal();
-  });
-
-  $("calPrev")?.addEventListener("click", () => {
-    S.cal.m--;
-    if (S.cal.m < 0) { S.cal.m = 11; S.cal.y--; }
-    renderCal();
-  });
-
-  $("calNext")?.addEventListener("click", () => {
-    S.cal.m++;
-    if (S.cal.m > 11) { S.cal.m = 0; S.cal.y++; }
-    renderCal();
-  });
-
-  $("btnLb")?.addEventListener("click", () => socket.emit("admin:get"));
-
-  /* ── Conv: Start Conversation button ─────────────── */
-  $("btnStartConv")?.addEventListener("click", () => convState("prefs"));
-
-  /* ── Conv: Back ───────────────────────────────────── */
-  $("btnBackIdle")?.addEventListener("click", () => convState("idle"));
-
-  /* ── Conv: Gender chips ───────────────────────────── */
-  $("genderChips")?.addEventListener("click", e => {
-    const btn = e.target.closest(".chip");
-    if (!btn) return;
-    S.prefs.gender = btn.dataset.val;
-    syncChips("genderChips", S.prefs.gender);
-  });
-
-  /* ── Conv: Level chips ────────────────────────────── */
-  $("levelChips")?.addEventListener("click", e => {
-    const btn = e.target.closest(".chip");
-    if (!btn) return;
-    S.prefs.level = btn.dataset.val;
-    syncChips("levelChips", S.prefs.level);
-  });
-
-  /* ── Conv: Find match ─────────────────────────────── */
-  $("btnFind")?.addEventListener("click", () => {
-    /* AI selected → go straight to AI tab */
-    if (S.prefs.gender === "AI") {
-      socket.emit("match:start", { gender: "AI", level: "Any" });
-      hintAi("Connecting to AI Coach…");
-      setTab("ai");
-      return;
-    }
-    hintSearch("Searching for a partner…");
-    socket.emit("match:start", { gender: S.prefs.gender, level: S.prefs.level });
-  });
-
-  $("btnStop")?.addEventListener("click", () => {
-    socket.emit("match:stop");
-    hintSearch("");
-  });
-
-  /* ── Conv: Leave room ─────────────────────────────── */
-  $("btnLeave")?.addEventListener("click", () => {
-    if (S.room.id || S.ai.id) socket.emit("room:leave");
-  });
-
-  /* ── Conv: Report partner ─────────────────────────── */
-  $("btnReport")?.addEventListener("click", () => {
-    if (!S.room.id) return;
-    socket.emit("report:partner", { roomId: S.room.id });
-  });
-
-  /* ── Conv: Human send ─────────────────────────────── */
-  $("btnSend")?.addEventListener("click", sendHuman);
-  $("msgInput")?.addEventListener("keydown", e => { if (e.key === "Enter") sendHuman(); });
-
-  /* ── Conv: Rating stars ───────────────────────────── */
-  document.querySelectorAll(".rate-star").forEach(btn => {
-    btn.addEventListener("click", () => {
-      if (!S.room.id) return;
-      const stars = clamp(Number(btn.dataset.r), 1, 5);
-      document.querySelectorAll(".rate-star")
-        .forEach(b => b.classList.toggle("picked", Number(b.dataset.r) === stars));
-      socket.emit("rate:partner", { roomId: S.room.id, stars });
-    });
-  });
-
-  /* ── Conv: Icebreaker navigation ──────────────────── */
-  $("qPrev")?.addEventListener("click", () => {
-    if (S.room.id) socket.emit("icebreaker:nav", { roomId: S.room.id, dir: "prev" });
-  });
-  $("qNext")?.addEventListener("click", () => {
-    if (S.room.id) socket.emit("icebreaker:nav", { roomId: S.room.id, dir: "next" });
-  });
-
-  /* ── Conv: Voice On/Off ───────────────────────────── */
-  $("btnVoice")?.addEventListener("click", async () => {
-    if (!S.room.id) { hintVoice("Join a room first."); return; }
-    await warmAudio();
-    if (!S.voiceOn) await startVoice();
-    else            await stopVoice();
-  });
-
-  /* ── AI tab: Start AI ─────────────────────────────── */
-  $("btnAiStart")?.addEventListener("click", () => {
-    if (S.ai.id) {
-      hintAi("AI session already active.");
-      return;
-    }
-    socket.emit("match:start", { gender: "AI", level: "Any" });
-    hintAi("Connecting to AI Coach…");
-  });
-
-  /* ── AI tab: Voice On/Off ─────────────────────────── */
-  $("btnAiVoice")?.addEventListener("click", async () => {
-    if (!S.ai.id) { hintAi("Press <strong>Start AI</strong> first."); return; }
-    if (!S.aiListening) startAiMic();
-    else                await stopAiMicAndSend();
-    setAiVoiceBtn();
-  });
-
-  /* ── AI tab: Finish session ───────────────────────── */
-  $("btnAiLeave")?.addEventListener("click", () => {
-    if (!S.ai.id) { resetAi(); return; }
-    stopAiMic();
-    socket.emit("room:leave");
-  });
-
-  /* ── AI tab: Typed message ────────────────────────── */
-  $("btnAiSend")?.addEventListener("click", sendAi);
-  $("aiInput")?.addEventListener("keydown", e => { if (e.key === "Enter") sendAi(); });
-}
-
-/* ─────────────────────────────────────────────────────────
-   WIRE: SOCKET EVENTS
-───────────────────────────────────────────────────────── */
-function wireSocket() {
-
-  /* ── Questions from server ────────────────────────── */
-  socket.on("global:questions", ({ questions }) => {
-    S.questions = Array.isArray(questions) ? questions.slice(0, 10) : [];
-    while (S.questions.length < 10) S.questions.push("Tell me something interesting about you.");
-    renderQ();
-  });
-
-  /* ── Live stats ───────────────────────────────────── */
-  socket.on("global:stats", ({ online, waiting, rooms }) => {
-    const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? 0); };
-    set("statOnline",  online);
-    set("statWaiting", waiting);
-    set("statRooms",   rooms);
-
-    /* Also update online count in Conversation tab */
-    const oc = $("onlineCount");
-    if (oc) oc.textContent = String(online ?? 0);
-  });
-
-  /* ── Admin snapshot (leaderboard + optional user list) */
-  socket.on("admin:snapshot", snap => {
-    if (snap?.leaderboard)  renderLb(snap.leaderboard);
-    if (Array.isArray(snap?.onlineUsers)) renderOnline(snap.onlineUsers);
-  });
-
-  /* ── Register success ─────────────────────────────── */
-  socket.on("user:register:ok", ({ user, aiScore }) => {
-    S.name = user.name;
-    localStorage.setItem(LS_NAME, user.name);
-
-    const mn = $("meName"); if (mn) mn.textContent = user.name;
-    if (aiScore) renderScore(aiScore);
-
-    showScreen("main");
-    resetConv();
-    resetAi();
-    renderStats();
-    renderCal();
-    syncChips("genderChips", S.prefs.gender);
-    syncChips("levelChips",  S.prefs.level);
-
-    /* Always open on Conversation tab */
-    setTab("conv");
-    convState("idle");
-  });
-
-  /* ── Register fail ────────────────────────────────── */
-  socket.on("user:register:fail", ({ reason }) => {
-    if (reason === "banned") { showScreen("banned"); return; }
-
-    const ne = $("nameErr");
-    if (!ne) return;
-
-    if (reason === "name_taken") {
-      ne.textContent = "This name is already in use by someone else. Choose a different name.";
-    } else {
-      ne.textContent = "Invalid name. Please try something else.";
-    }
-  });
-
-  /* ── Kicked (same name logged in elsewhere) ───────── */
-  socket.on("user:kicked", () => {
-    localStorage.removeItem(LS_NAME);
-    location.reload();
-  });
-
-  /* ── Banned mid-session ───────────────────────────── */
-  socket.on("user:banned", () => showScreen("banned"));
-
-  /* ── Searching ────────────────────────────────────── */
-  socket.on("match:searching", () => hintSearch("Searching for a partner…"));
-
-  /* ── Match found ──────────────────────────────────── */
-  socket.on("match:found", async ({ roomId, partnerName, aiScore }) => {
-    if (aiScore) renderScore(aiScore);
-
-    /* ── AI room ─────────────────────────────────── */
-    if (partnerName === "AI") {
-      S.ai.id = roomId;
-      sessionStart("ai");
-
-      const am = $("aiMessages"); if (am) am.innerHTML = "";
-      const ar = $("aiReport");   if (ar) ar.style.display = "none";
-
-      addMsg("aiMessages", "System", "Connected to AI Coach. Ask anything or use voice.", "sys");
-      hintAi("AI ready ✅  Voice On → speak → Voice Off → AI replies by voice.");
-      setAiVoiceBtn();
-      setTab("ai");
-      return;
-    }
-
-    /* ── Human room ──────────────────────────────── */
-    S.room.id     = roomId;
-    S.room.partner= partnerName;
-    S.room.polite = (S.name || "").localeCompare(partnerName || "") < 0;
-    sessionStart("human");
-
-    const pn = $("partnerName"); if (pn) pn.textContent  = partnerName;
-    const pa = $("pAvatar");     if (pa) pa.textContent   = (partnerName || "?")[0].toUpperCase();
-    const msgs = $("messages");  if (msgs) msgs.innerHTML = "";
-
-    hintSearch("");
-    convState("chat");
-    setTab("conv");
-
-    addMsg("messages", "System", `Connected with ${partnerName}. Say hello!`, "sys");
-    hintVoice("Press Voice On to speak. Your partner will hear you immediately.");
-
-    /* Pre-build peer NOW → ready to receive their audio one-way */
-    if (!S.pc) buildPeer();
-    await warmAudio();
-  });
-
-  /* ── Icebreaker index change ──────────────────────── */
-  socket.on("icebreaker:set", ({ index }) => {
-    S.qIdx = Number(index) || 0;
-    renderQ();
-  });
-
-  /* ── Chat message ─────────────────────────────────── */
-  socket.on("chat:message", async msg => {
-    if (!msg?.from) return;
-
-    /* AI room message */
-    if (S.ai.id && msg.from === "AI") {
-      addMsg("aiMessages", "AI Coach", msg.text);
-      await aiSpeak(msg.text);
-      return;
-    }
-
-    /* Human room message */
-    if (S.room.id && msg.from !== "AI") {
-      const isMe = msg.from === S.name;
-      addMsg("messages", msg.from, msg.text, isMe ? "me" : "");
-    }
-  });
-
-  /* ── Report / Rate acknowledgments ───────────────── */
-  socket.on("report:ok", ({ reported }) =>
-    addMsg("messages", "System", `Reported: ${reported || "ok"}`, "sys"));
-
-  socket.on("rate:ok", ({ rated }) =>
-    addMsg("messages", "System", `Rated: ${rated || "ok"}`, "sys"));
-
-  /* ── Room ended ───────────────────────────────────── */
-  socket.on("room:ended", ({ reason }) => {
-    if (S.room.id) {
-      sessionEnd("human");
-      addMsg("messages", "System", `Conversation ended${reason ? " (" + reason + ")" : ""}.`, "sys");
-      setTimeout(() => resetConv(), 1800);
-    }
-    if (S.ai.id) {
-      sessionEnd("ai");
-      addMsg("aiMessages", "System", "AI session ended.", "sys");
-      S.ai.id = null;
-      stopAiMic();
-      setAiVoiceBtn();
-      hintAi("Session ended. Press <strong>Start AI</strong> to begin a new session.");
-    }
-  });
-
-  /* ── AI Coach report ──────────────────────────────── */
-  socket.on("coach:report", ({ report, aiScore }) => {
-    if (aiScore) renderScore(aiScore);
-
-    /* Show report card */
-    const rc = $("aiReport"); if (rc) rc.style.display = "block";
-
-    /* Summary */
-    const rs = $("rSummary"); if (rs) rs.textContent = report?.summary || "Report received.";
-
-    /* Scores */
-    const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v ?? "—"); };
-    set("rBand", report?.band);
-    set("rFlu",  report?.fluency);
-    set("rGra",  report?.grammar);
-    set("rVoc",  report?.vocab);
-    set("rPro",  report?.pronunciation);
-
-    /* Fixes */
-    const fl = $("rFixes");
-    if (fl) {
-      fl.innerHTML = "";
-      (Array.isArray(report?.fixes) ? report.fixes : []).forEach(x => {
-        const li = document.createElement("li");
-        li.textContent = x;
-        fl.appendChild(li);
-      });
-    }
-
-    /* Next steps */
-    const sl = $("rSteps");
-    if (sl) {
-      sl.innerHTML = "";
-      (Array.isArray(report?.next_steps) ? report.next_steps : []).forEach(x => {
-        const li = document.createElement("li");
-        li.textContent = x;
-        sl.appendChild(li);
-      });
-    }
-
-    sessionEnd("ai");
-    S.ai.id = null;
-    stopAiMic();
-    setAiVoiceBtn();
-    hintAi("✅ Session finished! Your report is below.");
-
-    /* Scroll to report */
-    const ar = $("aiReport");
-    if (ar) setTimeout(() => ar.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
-  });
-
-  /* ── WebRTC signaling ─────────────────────────────── */
-  socket.on("webrtc:offer", async ({ sdp, from }) => handleOffer(sdp, from));
-
-  socket.on("webrtc:answer", async ({ sdp }) => {
-    if (!S.pc) return;
-    try { await S.pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch (_) {}
-  });
-
-  socket.on("webrtc:ice", async ({ candidate }) => {
-    if (!S.pc) return;
-    try { await S.pc.addIceCandidate(candidate); } catch (_) {}
-  });
-
-  /* ── Connection status ────────────────────────────── */
-  socket.on("connect",    () => netBadge(""));
-  socket.on("disconnect", () => {
-    netBadge("Offline… reconnecting");
-    if (S.aiListening) stopAiMic();
-  });
-  socket.io?.on?.("reconnect_attempt", () => netBadge("Reconnecting…"));
-  socket.io?.on?.("reconnect",         () => netBadge(""));
-}
-
-/* ─────────────────────────────────────────────────────────
-   GLOBAL EVENTS
-───────────────────────────────────────────────────────── */
-
-/* Escape → stop AI mic */
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && S.aiListening) stopAiMic();
+});
+$("rate-skip").addEventListener("click",   () => $("rate-modal").classList.remove("open"));
+$("rate-submit").addEventListener("click", () => {
+  if (S.pendingStars > 0 && S.pendingRoomId)
+    S.socket.emit("rate:partner", { roomId: S.pendingRoomId, stars: S.pendingStars });
+  $("rate-modal").classList.remove("open");
+  toast("Rating submitted ⭐", "success");
 });
 
-/* Tab hidden → stop AI mic */
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden && S.aiListening) {
-    stopAiMic();
-    hintAi("Mic stopped (tab hidden).");
-  }
+/* ═══════════════════════════════════════════════════════════
+   BOOT — patch socket routing after connect
+═══════════════════════════════════════════════════════════ */
+document.addEventListener("DOMContentLoaded", () => {
+  // Patch after socket is initialised (called inside initSocket)
+  const origInit = initSocket;
+  window.initSocket = function() {
+    origInit();
+    // After a tick, patch the chat routing
+    setTimeout(patchSocket, 200);
+  };
 });
 
-/* Browser online/offline */
-window.addEventListener("offline", () => netBadge("Offline"));
-window.addEventListener("online",  () => netBadge(""));
-
-/* ─────────────────────────────────────────────────────────
-   BOOT
-───────────────────────────────────────────────────────── */
-(async function boot() {
-
-  /* 1. Load saved practice data */
-  loadPrac();
-
-  /* 2. Fetch RTC config from server */
-  await loadRtcCfg();
-
-  /* 3. Wire all UI + socket events */
-  wireUI();
-  wireSocket();
-
-  /* 4. Render initial local data */
-  renderStats();
-  renderCal();
-  renderQ();
-
-  /* 5. Sync chips to default prefs */
-  syncChips("genderChips", S.prefs.gender);
-  syncChips("levelChips",  S.prefs.level);
-
-  /* 6. Show Name screen, hide rest */
-  showScreen("name");
-  convState("idle");
-
-  /* 7. Auto-login if name was saved */
-  const stored = (localStorage.getItem(LS_NAME) || "").trim();
-  if (stored) {
-    const ni = $("nameInput");
-    if (ni) ni.value = stored;
-    socket.emit("user:register", { name: stored });
-  }
-
-})();
+// Also patch after any reconnect
+function patchAfterConnect() {
+  if (S.socket) patchSocket();
+}
